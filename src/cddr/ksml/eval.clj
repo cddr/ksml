@@ -95,6 +95,22 @@
            (process [_ k v]
              (process-fn @ctx k v))))))))
 
+(defn transformer-supplier
+  ([transform-fn]
+   (transformer-supplier transform-fn (constantly nil)))
+
+  ([transform-fn punctuate-fn]
+   (reify TransformerSupplier
+     (get [_]
+       (let [ctx (atom nil)]
+         (reify Transformer
+           (init [_ context]
+             (reset! ctx context))
+           (punctuate [_ ts]
+             (punctuate-fn @ctx ts))
+           (transform [_ k v]
+             (transform-fn @ctx k v))))))))
+
 ;; kstream/ktable ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Lots of methods exist on both KStream and KTable classes. Clojure
@@ -232,28 +248,12 @@
 (defmethod eval-op :transform
   ([_ transform-fn stream state-stores]
    `(.. ~(eval stream)
-        (transform `(reify TransformerSupplier
-                      (get [this]
-                        (let [ctx# (atom nil)]
-                          (reify TransformerSupplier
-                            (init [this context]
-                              (reset! ctx# context))
-                            (transform [this k v]
-                              (~transform-fn @ctx# k v))))))
+        (transform `(transformer-supplier ~transform)
                    (into-array String state-stores))))
   
   ([_ transform-fn punctuate-fn stream state-stores]
    `(.. ~(eval stream)
-        (transform `(reify TransformerSupplier
-                      (get [this]
-                        (let [ctx# (atom nil)]
-                          (reify TransformerSupplier
-                            (init [this context]
-                              (reset! ctx# context))
-                            (punctuate [this timestamp]
-                              (~punctuate-fn @ctx# timestamp))
-                            (transform [this k v]
-                              (~transform-fn @ctx# k v))))))
+        (transform `(transformer-supplier ~transform-fn ~punctuate-fn)
                    (into-array String state-stores)))))
 
 (defmethod eval-op :to!
