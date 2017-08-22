@@ -45,6 +45,15 @@
   [_ & args]
   `(.. *builder* (merge (into-array KStream (vector ~@args)))))
 
+;; lamdas ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+
+(defn predicate
+  [f]
+  (reify Predicate
+    (test [_ k v]
+      (boolean (f k v)))))
+
 ;; kstream/ktable ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Lots of methods exist on both KStream and KTable classes. Clojure
@@ -56,23 +65,17 @@
   `(.. ~(eval stream)
        (branch (into-array Predicate
                            (vector ~@(for [p-fn# predicate-fns]
-                                       `(reify Predicate
-                                          (test [_ k# v#]
-                                            (boolean (~p-fn# k# v#))))))))))
+                                       `(predicate p-fn#)))))))
 
 (defmethod eval-op :filter
   [_ predicate-fn stream-or-table]
   `(.. ~(eval stream-or-table)
-       (filter (reify Predicate
-                 (test [_ k# v#]
-                   (boolean (~predicate-fn k# v#)))))))
+       (filter (predicate predicate-fn))))
 
 (defmethod eval-op :filter-not
   [_ predicate-fn stream-or-table]
   `(.. ~(eval stream-or-table)
-       (filterNot (reify Predicate
-                    (test [_ k# v#]
-                      (boolean (~predicate-fn k# v#)))))))
+       (filterNot (predicate predicate-fn))))
 
 (defmethod eval-op :flat-map
   [_ map-fn stream-or-table]
