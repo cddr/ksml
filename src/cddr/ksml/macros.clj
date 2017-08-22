@@ -31,5 +31,7 @@
            (= (.startsWith "foo")))
          (fn [k v]
            (= (.startsWith "bar")))])
+
+  (ksml [:serde ByteArray])
          
   )
