@@ -5,6 +5,7 @@
    [clojure.string :as str])
   (:import
    (org.apache.kafka.streams KeyValue)
+   (org.apache.kafka.streams.processor Processor ProcessorSupplier)
    (org.apache.kafka.streams.kstream Predicate
                                      ForeachAction
                                      ValueMapper KeyValueMapper
@@ -77,6 +78,22 @@
   (reify ForeachAction
     (apply [_ k v]
       (each-fn k v))))
+
+(defn processor-supplier
+  ([process-fn]
+   (processor-supplier process-fn (constantly nil)))
+
+  ([process-fn punctuate-fn]
+   (reify ProcessorSupplier
+     (get [_]
+       (let [ctx (atom nil)]
+         (reify Processor
+           (init [_ context]
+             (reset! ctx context))
+           (punctuate [_ ts]
+             (punctuate-fn @ctx ts))
+           (process [_ k v]
+             (process-fn @ctx k v))))))))
 
 ;; kstream/ktable ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -192,26 +209,10 @@
 (defmethod eval-op :process
   ([_ process-fn stream]
    `(.. ~(eval stream)
-        (process (reify ProcessorSupplier
-                   (get [_]
-                     (let [ctx# (atom nil)]
-                       (reify Processor
-                         (init [_ context#]
-                           (reset! ctx# context#))
-                         (process [_ k# v#]
-                           (~process-fn k# v#)))))))))
+        (process (processor-supplier ~process-fn))))
   ([_ process-fn punctuate-fn stream]
    `(.. ~(eval stream)
-        (process (reify ProcessorSupplier
-                   (get [_]
-                     (let [ctx# (atom nil)]
-                       (reify Processor
-                         (init [_ context#]
-                           (reset! ctx# context#))
-                         (punctuate [_ ts#]
-                           (~punctuate-fn @ctx# ts#))
-                         (process [_ k# v#]
-                           (~process-fn @ctx# k# v#))))))))))
+        (process (processor-supplier ~process-fn ~punctuate-fn)))))
                          
 (defmethod eval-op :select-key
   [_ map-fn stream]
