@@ -5,6 +5,7 @@
    [clojure.string :as str])
   (:import
    (org.apache.kafka.streams KeyValue)
+   (org.apache.kafka.streams.processor Processor ProcessorSupplier)
    (org.apache.kafka.streams.kstream Predicate
                                      ForeachAction
                                      ValueMapper KeyValueMapper
@@ -45,6 +46,71 @@
   [_ & args]
   `(.. *builder* (merge (into-array KStream (vector ~@args)))))
 
+;; lamdas ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+
+(defn predicate
+  [pred-fn]
+  (reify Predicate
+    (test [_ k v]
+      (boolean (pred-fn k v)))))
+
+(defn key-value-mapper
+  [map-fn]
+  (reify KeyValueMapper
+    (apply [_ k v]
+      (apply key-value (map-fn k v)))))
+
+(defn value-mapper
+  [map-fn]
+  (reify ValueMapper
+    (apply [_ v]
+      (map-fn v))))
+
+(defn value-joiner
+  [join-fn]
+  (reify ValueJoiner
+    (apply [_ left right]
+      (join-fn left right))))
+
+(defn foreach-action
+  [each-fn]
+  (reify ForeachAction
+    (apply [_ k v]
+      (each-fn k v))))
+
+(defn processor-supplier
+  ([process-fn]
+   (processor-supplier process-fn (constantly nil)))
+
+  ([process-fn punctuate-fn]
+   (reify ProcessorSupplier
+     (get [_]
+       (let [ctx (atom nil)]
+         (reify Processor
+           (init [_ context]
+             (reset! ctx context))
+           (punctuate [_ ts]
+             (punctuate-fn @ctx ts))
+           (process [_ k v]
+             (process-fn @ctx k v))))))))
+
+(defn transformer-supplier
+  ([transform-fn]
+   (transformer-supplier transform-fn (constantly nil)))
+
+  ([transform-fn punctuate-fn]
+   (reify TransformerSupplier
+     (get [_]
+       (let [ctx (atom nil)]
+         (reify Transformer
+           (init [_ context]
+             (reset! ctx context))
+           (punctuate [_ ts]
+             (punctuate-fn @ctx ts))
+           (transform [_ k v]
+             (transform-fn @ctx k v))))))))
+
 ;; kstream/ktable ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Lots of methods exist on both KStream and KTable classes. Clojure
@@ -56,61 +122,45 @@
   `(.. ~(eval stream)
        (branch (into-array Predicate
                            (vector ~@(for [p-fn# predicate-fns]
-                                       `(reify Predicate
-                                          (test [_ k# v#]
-                                            (boolean (~p-fn# k# v#))))))))))
+                                       `(predicate p-fn#)))))))
 
 (defmethod eval-op :filter
   [_ predicate-fn stream-or-table]
   `(.. ~(eval stream-or-table)
-       (filter (reify Predicate
-                 (test [_ k# v#]
-                   (boolean (~predicate-fn k# v#)))))))
+       (filter (predicate predicate-fn))))
 
 (defmethod eval-op :filter-not
   [_ predicate-fn stream-or-table]
   `(.. ~(eval stream-or-table)
-       (filterNot (reify Predicate
-                    (test [_ k# v#]
-                      (boolean (~predicate-fn k# v#)))))))
+       (filterNot (predicate predicate-fn))))
 
 (defmethod eval-op :flat-map
   [_ map-fn stream-or-table]
   `(.. ~(eval stream-or-table)
-       (flatMap (reify KeyValueMapper
-                  (apply [_ k# v#]
-                    (apply key-value (~map-fn k# v#)))))))
+       (flatMap (key-value-mapper map-fn))))
 
 (defmethod eval-op :flat-map-values
   [_ map-fn stream-or-table]
   `(.. ~(eval stream-or-table)
-       (flatMapValues (reify ValueMapper
-                        (apply [_ v#]
-                          (~map-fn v#))))))
+       (flatMapValues (value-mapper ~map-fn))))
 
 (defmethod eval-op :foreach
   [_ each-fn stream]
   `(.. ~(eval stream)
-       (foreach (reify ForeachAction
-                  (apply [_ k# v#]
-                    (~each-fn k# v#))))))
+       (foreach (foreach-action ~each-fn))))
 
 (defmethod eval-op :group-by
   [_ group-fn stream & args]
   `(.. ~(eval stream)
        ~(remove nil? (list 'groupBy
-                           `(reify KeyValueMapper
-                              (apply [_ k# v#]
-                                (apply key-value (~group-fn k# v#))))
+                           `(key-value-map-fn ~group-fn)
                            args))))
 
 (defmethod eval-op :group-by-key
   [_ group-fn stream & args]
   `(.. ~(eval stream)
        ~(remove nil? (list 'groupByKey
-                            `(reify KeyValueMapper
-                               (apply [_ k# v#]
-                                 (apply key-value (~group-fn k# v#))))
+                            `(key-value-map-fn ~group-fn)
                             args))))
 
 (defmethod eval-op :join
@@ -118,73 +168,53 @@
   `(.. ~(eval left)
        ~(remove nil? (list 'join
                            (eval right)
-                           `(reify ValueJoiner
-                              (apply [_ left# right#]
-                                (~join-fn left# right#)))
+                           `(value-joiner ~join-fn)
                            args))))
 
 (defmethod eval-op :join-global
   [_ join-fn map-fn left right]
   `(.. ~(eval left)
        (join ~(eval right)
-             `(reify KeyValueMapper
-                (apply [_ k# v#]
-                  (~map-fn k# v#)))
-             `(reify ValueJoiner
-                (apply [_ left# right#]
-                  (~join-fn left# right#))))))
+             `(key-value-map-fn ~map-fn)
+             `(value-joiner ~join-fn))))
 
 (defmethod eval-op :left-join
   [_ join-fn left right & args]
   `(.. ~(eval left)
        ~(remove nil? (apply list 'leftJoin
                             (eval right)
-                            `(reify ValueJoiner
-                               (apply [_ left# right#]
-                                 (~join-fn left# right#)))
+                            `(value-joiner ~join-fn)
                             args))))
 
 (defmethod eval-op :left-join-global
   [_ join-fn map-fn left right]
   `(.. ~(eval left)
        (join ~(eval right)
-             `(reify KeyValueMapper
-                (apply [_ k# v#]
-                  (~map-fn k# v#)))
-             `(reify ValueJoiner
-                (apply [_ left# right#]
-                  (~join-fn left# right#))))))
+             `(key-value-mapper ~map-fn)
+             `(value-joiner ~join-fn))))
 
 (defmethod eval-op :map
   [_ map-fn stream]
   `(.. ~(eval stream)
-       (map (reify KeyValueMapper
-              (apply [_ k# v#]
-                (apply key-value (~map-fn k# v#)))))))
+       (map (key-value-mapper ~map-fn))))
 
 (defmethod eval-op :map-values
   [_ map-fn stream]
   `(.. ~(eval stream)
-       (mapValues (reify ValueMapper
-                    (apply [_ v#]
-                      (~map-fn v#))))))
+       (mapValues (value-mapper ~map-fn))))
 
 (defmethod eval-op :outer-join
   [_ join-fn left right & args]
   `(.. ~(eval left)
        ~(remove nil? (apply list 'outerJoin
                             (eval right)
-                            `(reify ValueJoiner
-                               (apply [_ left# right#]
-                                 (~join-fn left# right#)))
+                            `(value-joiner ~join-fn)
                             args))))
 
 (defmethod eval-op :peek
-  [_ foreach-fn stream]
+  [_ each-fn stream]
   `(.. ~(eval stream)
-       (peek (reify ForeachAction
-               (apply [_ k# v#]
-                 (~foreach-fn k# v#))))))
+       (peek (foreach-action ~each-fn))))
 
 (defmethod eval-op :print
   [_ stream & args]
@@ -195,33 +225,15 @@
 (defmethod eval-op :process
   ([_ process-fn stream]
    `(.. ~(eval stream)
-        (process (reify ProcessorSupplier
-                   (get [_]
-                     (let [ctx# (atom nil)]
-                       (reify Processor
-                         (init [_ context#]
-                           (reset! ctx# context#))
-                         (process [_ k# v#]
-                           (~process-fn k# v#)))))))))
+        (process (processor-supplier ~process-fn))))
   ([_ process-fn punctuate-fn stream]
    `(.. ~(eval stream)
-        (process (reify ProcessorSupplier
-                   (get [_]
-                     (let [ctx# (atom nil)]
-                       (reify Processor
-                         (init [_ context#]
-                           (reset! ctx# context#))
-                         (punctuate [_ ts#]
-                           (~punctuate-fn @ctx# ts#))
-                         (process [_ k# v#]
-                           (~process-fn @ctx# k# v#))))))))))
+        (process (processor-supplier ~process-fn ~punctuate-fn)))))
                          
 (defmethod eval-op :select-key
   [_ map-fn stream]
   `(.. ~(eval stream)
-       (selectKey (reify KeyValueMapper
-                    (apply [_ k v]
-                      (apply key-value (~map-fn k# v#)))))))
+       (selectKey (key-value-mapper ~map-fn))))
 
 (defmethod eval-op :through
   [_ stream & args]
@@ -236,28 +248,12 @@
 (defmethod eval-op :transform
   ([_ transform-fn stream state-stores]
    `(.. ~(eval stream)
-        (transform `(reify TransformerSupplier
-                      (get [this]
-                        (let [ctx# (atom nil)]
-                          (reify TransformerSupplier
-                            (init [this context]
-                              (reset! ctx# context))
-                            (transform [this k v]
-                              (~transform-fn @ctx# k v))))))
+        (transform `(transformer-supplier ~transform)
                    (into-array String state-stores))))
   
   ([_ transform-fn punctuate-fn stream state-stores]
    `(.. ~(eval stream)
-        (transform `(reify TransformerSupplier
-                      (get [this]
-                        (let [ctx# (atom nil)]
-                          (reify TransformerSupplier
-                            (init [this context]
-                              (reset! ctx# context))
-                            (punctuate [this timestamp]
-                              (~punctuate-fn @ctx# timestamp))
-                            (transform [this k v]
-                              (~transform-fn @ctx# k v))))))
+        (transform `(transformer-supplier ~transform-fn ~punctuate-fn)
                    (into-array String state-stores)))))
 
 (defmethod eval-op :to!
