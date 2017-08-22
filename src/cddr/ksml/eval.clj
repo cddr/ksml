@@ -72,6 +72,12 @@
     (apply [_ left right]
       (join-fn left right))))
 
+(defn foreach-action
+  [each-fn]
+  (reify ForeachAction
+    (apply [_ k v]
+      (each-fn k v))))
+
 ;; kstream/ktable ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Lots of methods exist on both KStream and KTable classes. Clojure
@@ -108,9 +114,7 @@
 (defmethod eval-op :foreach
   [_ each-fn stream]
   `(.. ~(eval stream)
-       (foreach (reify ForeachAction
-                  (apply [_ k# v#]
-                    (~each-fn k# v#))))))
+       (foreach (foreach-action ~each-fn))))
 
 (defmethod eval-op :group-by
   [_ group-fn stream & args]
@@ -175,11 +179,9 @@
                             args))))
 
 (defmethod eval-op :peek
-  [_ foreach-fn stream]
+  [_ each-fn stream]
   `(.. ~(eval stream)
-       (peek (reify ForeachAction
-               (apply [_ k# v#]
-                 (~foreach-fn k# v#))))))
+       (peek (foreach-action ~each-fn))))
 
 (defmethod eval-op :print
   [_ stream & args]
