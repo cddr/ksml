@@ -60,6 +60,12 @@
     (apply [_ k v]
       (apply key-value (map-fn k v)))))
 
+(defn value-mapper
+  [map-fn]
+  (reify ValueMapper
+    (apply [_ v]
+      (map-fn v))))
+
 ;; kstream/ktable ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Lots of methods exist on both KStream and KTable classes. Clojure
@@ -91,9 +97,7 @@
 (defmethod eval-op :flat-map-values
   [_ map-fn stream-or-table]
   `(.. ~(eval stream-or-table)
-       (flatMapValues (reify ValueMapper
-                        (apply [_ v#]
-                          (~map-fn v#))))))
+       (flatMapValues (value-mapper ~map-fn))))
 
 (defmethod eval-op :foreach
   [_ each-fn stream]
@@ -162,9 +166,7 @@
 (defmethod eval-op :map-values
   [_ map-fn stream]
   `(.. ~(eval stream)
-       (mapValues (reify ValueMapper
-                    (apply [_ v#]
-                      (~map-fn v#))))))
+       (mapValues (value-mapper ~map-fn))))
 
 (defmethod eval-op :outer-join
   [_ join-fn left right & args]
