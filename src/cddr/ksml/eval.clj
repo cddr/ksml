@@ -49,10 +49,16 @@
 ;;
 
 (defn predicate
-  [f]
+  [pred-fn]
   (reify Predicate
     (test [_ k v]
-      (boolean (f k v)))))
+      (boolean (pred-fn k v)))))
+
+(defn key-value-mapper
+  [map-fn]
+  (reify KeyValueMapper
+    (apply [_ k v]
+      (apply key-value (map-fn k v)))))
 
 ;; kstream/ktable ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -80,9 +86,7 @@
 (defmethod eval-op :flat-map
   [_ map-fn stream-or-table]
   `(.. ~(eval stream-or-table)
-       (flatMap (reify KeyValueMapper
-                  (apply [_ k# v#]
-                    (apply key-value (~map-fn k# v#)))))))
+       (flatMap (key-value-mapper map-fn))))
 
 (defmethod eval-op :flat-map-values
   [_ map-fn stream-or-table]
@@ -102,18 +106,14 @@
   [_ group-fn stream & args]
   `(.. ~(eval stream)
        ~(remove nil? (list 'groupBy
-                           `(reify KeyValueMapper
-                              (apply [_ k# v#]
-                                (apply key-value (~group-fn k# v#))))
+                           `(key-value-map-fn ~group-fn)
                            args))))
 
 (defmethod eval-op :group-by-key
   [_ group-fn stream & args]
   `(.. ~(eval stream)
        ~(remove nil? (list 'groupByKey
-                            `(reify KeyValueMapper
-                               (apply [_ k# v#]
-                                 (apply key-value (~group-fn k# v#))))
+                            `(key-value-map-fn ~group-fn)
                             args))))
 
 (defmethod eval-op :join
@@ -130,9 +130,7 @@
   [_ join-fn map-fn left right]
   `(.. ~(eval left)
        (join ~(eval right)
-             `(reify KeyValueMapper
-                (apply [_ k# v#]
-                  (~map-fn k# v#)))
+             `(key-value-map-fn ~map-fn)
              `(reify ValueJoiner
                 (apply [_ left# right#]
                   (~join-fn left# right#))))))
@@ -151,9 +149,7 @@
   [_ join-fn map-fn left right]
   `(.. ~(eval left)
        (join ~(eval right)
-             `(reify KeyValueMapper
-                (apply [_ k# v#]
-                  (~map-fn k# v#)))
+             `(key-value-mapper ~map-fn)
              `(reify ValueJoiner
                 (apply [_ left# right#]
                   (~join-fn left# right#))))))
@@ -161,9 +157,7 @@
 (defmethod eval-op :map
   [_ map-fn stream]
   `(.. ~(eval stream)
-       (map (reify KeyValueMapper
-              (apply [_ k# v#]
-                (apply key-value (~map-fn k# v#)))))))
+       (map (key-value-mapper ~map-fn))))
 
 (defmethod eval-op :map-values
   [_ map-fn stream]
@@ -222,9 +216,7 @@
 (defmethod eval-op :select-key
   [_ map-fn stream]
   `(.. ~(eval stream)
-       (selectKey (reify KeyValueMapper
-                    (apply [_ k v]
-                      (apply key-value (~map-fn k# v#)))))))
+       (selectKey (key-value-mapper ~map-fn))))
 
 (defmethod eval-op :through
   [_ stream & args]
