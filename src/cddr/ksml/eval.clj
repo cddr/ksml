@@ -4,13 +4,15 @@
   (:require
    [clojure.string :as str])
   (:import
+   (org.apache.kafka.common.serialization Serdes)
    (org.apache.kafka.streams KeyValue)
    (org.apache.kafka.streams.processor Processor ProcessorSupplier)
-   (org.apache.kafka.streams.kstream Predicate
-                                     ForeachAction
-                                     ValueMapper KeyValueMapper
-                                     ValueJoiner
-                                     Transformer TransformerSupplier)))
+   (org.apache.kafka.streams.kstream
+    Predicate
+    ForeachAction
+    ValueMapper KeyValueMapper
+    ValueJoiner
+    Transformer TransformerSupplier)))
 
 (defn dispatcher [op & args]
   op)
@@ -45,6 +47,16 @@
 (defmethod eval-op :merge
   [_ & args]
   `(.. *builder* (merge (into-array KStream (vector ~@args)))))
+
+;; serdes ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+
+(defmethod eval-op :serde
+  ([_ id]
+   (if (instance? Serde id)
+     `(.. Serdes (~id))))
+  ([_ serializer deserializer]
+   `(.. Serdes (serdeFrom ~serializer ~deserializer))))
 
 ;; lamdas ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
