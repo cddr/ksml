@@ -66,6 +66,12 @@
     (apply [_ v]
       (map-fn v))))
 
+(defn value-joiner
+  [join-fn]
+  (reify ValueJoiner
+    (apply [_ left right]
+      (join-fn left right))))
+
 ;; kstream/ktable ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Lots of methods exist on both KStream and KTable classes. Clojure
@@ -125,9 +131,7 @@
   `(.. ~(eval left)
        ~(remove nil? (list 'join
                            (eval right)
-                           `(reify ValueJoiner
-                              (apply [_ left# right#]
-                                (~join-fn left# right#)))
+                           `(value-joiner ~join-fn)
                            args))))
 
 (defmethod eval-op :join-global
@@ -135,18 +139,14 @@
   `(.. ~(eval left)
        (join ~(eval right)
              `(key-value-map-fn ~map-fn)
-             `(reify ValueJoiner
-                (apply [_ left# right#]
-                  (~join-fn left# right#))))))
+             `(value-joiner ~join-fn))))
 
 (defmethod eval-op :left-join
   [_ join-fn left right & args]
   `(.. ~(eval left)
        ~(remove nil? (apply list 'leftJoin
                             (eval right)
-                            `(reify ValueJoiner
-                               (apply [_ left# right#]
-                                 (~join-fn left# right#)))
+                            `(value-joiner ~join-fn)
                             args))))
 
 (defmethod eval-op :left-join-global
@@ -154,9 +154,7 @@
   `(.. ~(eval left)
        (join ~(eval right)
              `(key-value-mapper ~map-fn)
-             `(reify ValueJoiner
-                (apply [_ left# right#]
-                  (~join-fn left# right#))))))
+             `(value-joiner ~join-fn))))
 
 (defmethod eval-op :map
   [_ map-fn stream]
@@ -173,9 +171,7 @@
   `(.. ~(eval left)
        ~(remove nil? (apply list 'outerJoin
                             (eval right)
-                            `(reify ValueJoiner
-                               (apply [_ left# right#]
-                                 (~join-fn left# right#)))
+                            `(value-joiner ~join-fn)
                             args))))
 
 (defmethod eval-op :peek
