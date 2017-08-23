@@ -217,10 +217,10 @@
 (defmethod eval-op :join
   [_ left right join-fn & args]
   `(.. ~(eval left)
-       ~(remove nil? (list 'join
-                           (eval right)
-                           `(value-joiner ~join-fn)
-                           (map eval args)))))
+       ~(remove nil? (apply list 'join
+                            (eval right)
+                            `(value-joiner ~join-fn)
+                            (map eval args)))))
 
 (defmethod eval-op :join-global
   [_ left right join-fn map-fn]
