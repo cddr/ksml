@@ -11,13 +11,12 @@ Make big data as easy as HTML.
 ```clojure
 (ns com.bigdata.app
   (:require
-    [cddr.ksml.macros :refer [ksml]]))
+    [cddr.ksml.core :refer [ksml]]))
 
 (def basic-join
-  (ksml [:join (fn [left right]
-                 {:left left, :right right})
-          [:stream #"foo"]
-          [:stream #"bar"]]))
+  (ksml [:join [:stream #"foo"] [:stream #"bar"]
+          (fn [f b]
+            {:foo f, :bar b})]))
 ```          
 
 ## Bugs

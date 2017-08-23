@@ -1,6 +1,6 @@
 (ns cddr.ksml.eval
   ""
-  (:refer-clojure :exclude [eval])
+  (:refer-clojure :exclude [eval reducer])
   (:require
    [clojure.string :as str])
   (:import
@@ -8,7 +8,10 @@
    (org.apache.kafka.streams KeyValue)
    (org.apache.kafka.streams.processor Processor ProcessorSupplier)
    (org.apache.kafka.streams.kstream
+    KStreamBuilder
+    JoinWindows
     Predicate
+    Initializer Aggregator Reducer
     ForeachAction
     ValueMapper KeyValueMapper
     ValueJoiner
@@ -27,38 +30,39 @@
 
 (defn eval
   [expr]
-  (apply eval-op (first expr) (rest expr)))
+  (if (coll? expr)
+    (apply eval-op (first expr) (rest expr))
+    expr))
 
 ;; builder ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 
 (defmethod eval-op :stream
   [_ & args]
-  `(.. *builder* (stream ~@args)))
+  `(.. *builder* (stream ~@(map eval args))))
 
 (defmethod eval-op :table
   [_ & args]
-  `(.. *builder* (table ~@args)))
+  `(.. *builder* (table ~@(map eval args))))
 
 (defmethod eval-op :global-table
   [_ & args]
-  `(.. *builder* (globalTable ~@args)))
+  `(.. *builder* (globalTable ~@(map eval args))))
 
 (defmethod eval-op :merge
   [_ & args]
-  `(.. *builder* (merge (into-array KStream (vector ~@args)))))
+  `(.. *builder* (merge (into-array KStream (vector ~@(map eval args))))))
 
 ;; serdes ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 
 (defmethod eval-op :serde
   ([_ id]
-   (if (instance? Serde id)
-     `(.. Serdes (~id))))
+   `(.. Serdes (~id)))
   ([_ serializer deserializer]
    `(.. Serdes (serdeFrom ~serializer ~deserializer))))
 
-;; lamdas ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; lambdas ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 
 (defn predicate
@@ -90,6 +94,24 @@
   (reify ForeachAction
     (apply [_ k v]
       (each-fn k v))))
+
+(defn initializer
+  [init-fn]
+  (reify Initializer
+    (apply [_]
+      (init-fn))))
+
+(defn aggregator
+  [agg-fn]
+  (reify Aggregator
+    (apply [_ k v agg]
+      (agg-fn agg [k v]))))
+
+(defn reducer
+  [reducer-fn]
+  (reify Reducer
+    (apply [_ v1 v2]
+      (reducer-fn v1 v2))))
 
 (defn processor-supplier
   ([process-fn]
@@ -128,6 +150,24 @@
 ;; Lots of methods exist on both KStream and KTable classes. Clojure
 ;; doesn't care which one since it is just invoking the underlying java
 ;; method anyway.
+;;
+;; The argument order is not a direct mapping of the kafka streams API. In
+;; many cases, this isn't really practical because the java methods are
+;; heavily overloaded which is not something that Clojure supports. In
+;; choosing the argument order for some operator, we must balance a few
+;; (sometimes competing) concerns
+;;
+;;   * where there is a corresponding clojure function (e.g. map, filter etc),
+;;     it should be use the same order
+;;
+;;   * when indented using standard clojure-modes, the indentation should
+;;     "look right" (i.e. not shifted off to the right in weird places)
+;;
+;;   * I'd rather not get into the business of parsing an individual
+;;     operator's arguments in order to decide how to pass them along to
+;;     the upstream function. In most cases, I think we can use multiple
+;;     arities to cover the main cases, and use optional arguments to
+;;     cover the rest
 
 (defmethod eval-op :branch
   [_ stream & predicate-fns]
@@ -157,49 +197,48 @@
        (flatMapValues (value-mapper ~map-fn))))
 
 (defmethod eval-op :foreach
-  [_ each-fn stream]
+  [_ stream each-fn]
   `(.. ~(eval stream)
        (foreach (foreach-action ~each-fn))))
 
 (defmethod eval-op :group-by
-  [_ group-fn stream & args]
+  [_ stream group-fn & args]
   `(.. ~(eval stream)
-       ~(remove nil? (list 'groupBy
-                           `(key-value-map-fn ~group-fn)
-                           args))))
+       ~(remove nil? (apply list 'groupBy
+                            `(key-value-map-fn ~group-fn)
+                            (map eval args)))))
 
 (defmethod eval-op :group-by-key
-  [_ group-fn stream & args]
+  [_ stream & args]
   `(.. ~(eval stream)
-       ~(remove nil? (list 'groupByKey
-                            `(key-value-map-fn ~group-fn)
-                            args))))
+       ~(remove nil? (apply list 'groupByKey
+                            (map eval args)))))
 
 (defmethod eval-op :join
-  [_ join-fn left right & args]
+  [_ left right join-fn & args]
   `(.. ~(eval left)
        ~(remove nil? (list 'join
                            (eval right)
                            `(value-joiner ~join-fn)
-                           args))))
+                           (map eval args)))))
 
 (defmethod eval-op :join-global
-  [_ join-fn map-fn left right]
+  [_ left right join-fn map-fn]
   `(.. ~(eval left)
        (join ~(eval right)
              `(key-value-map-fn ~map-fn)
              `(value-joiner ~join-fn))))
 
 (defmethod eval-op :left-join
-  [_ join-fn left right & args]
+  [_ left right join-fn & args]
   `(.. ~(eval left)
        ~(remove nil? (apply list 'leftJoin
                             (eval right)
                             `(value-joiner ~join-fn)
-                            args))))
+                            (map eval args)))))
 
 (defmethod eval-op :left-join-global
-  [_ join-fn map-fn left right]
+  [_ left right join-fn map-fn]
   `(.. ~(eval left)
        (join ~(eval right)
              `(key-value-mapper ~map-fn)
@@ -216,13 +255,12 @@
        (mapValues (value-mapper ~map-fn))))
 
 (defmethod eval-op :outer-join
-  [_ join-fn left right & args]
+  [_ left right join-fn & args]
   `(.. ~(eval left)
        ~(remove nil? (apply list 'outerJoin
                             (eval right)
                             `(value-joiner ~join-fn)
-                            args))))
-
+                            (map eval args)))))
 (defmethod eval-op :peek
   [_ each-fn stream]
   `(.. ~(eval stream)
@@ -232,44 +270,82 @@
   [_ stream & args]
   `(.. ~(eval stream)
        ~(remove nil? (apply list 'print
-                            args))))
+                            (map eval args)))))
 
 (defmethod eval-op :process
-  ([_ process-fn stream]
+  ([_ stream process-fn]
    `(.. ~(eval stream)
         (process (processor-supplier ~process-fn))))
-  ([_ process-fn punctuate-fn stream]
+  ([_ stream process-fn punctuate-fn]
    `(.. ~(eval stream)
         (process (processor-supplier ~process-fn ~punctuate-fn)))))
                          
 (defmethod eval-op :select-key
-  [_ map-fn stream]
+  [_ stream map-fn]
   `(.. ~(eval stream)
        (selectKey (key-value-mapper ~map-fn))))
 
 (defmethod eval-op :through
   [_ stream & args]
   `(.. ~(eval stream)
-       ~(remove nil? (apply list 'through args))))
+       ~(remove nil? (apply list
+                            'through
+                            (map eval args)))))
 
-(defmethod eval-op :to
+(defmethod eval-op :to!
   [_ stream & args]
   `(.. ~(eval stream)
-       ~(remove nil? (apply list 'to args))))
+       ~(remove nil? (apply list
+                            'to
+                            (map eval args)))))
+
+(defmethod eval-op :to-kstream
+  [_ table]
+  `(.. ~(eval table)
+       (toStream)))
 
 (defmethod eval-op :transform
-  ([_ transform-fn stream state-stores]
+  ([_ stream state-stores transform-fn]
    `(.. ~(eval stream)
         (transform `(transformer-supplier ~transform)
                    (into-array String state-stores))))
   
-  ([_ transform-fn punctuate-fn stream state-stores]
+  ([_ stream state-stores transform-fn punctuate-fn]
    `(.. ~(eval stream)
         (transform `(transformer-supplier ~transform-fn ~punctuate-fn)
                    (into-array String state-stores)))))
 
-(defmethod eval-op :to!
-  [_ stream topic]
+;; grouped streams/tables
+
+(defmethod eval-op :aggregate
+  [_ stream init-fn agg-fn & args]
   `(.. ~(eval stream)
-       (to ~topic)))
+       ~(remove nil? (apply list 'aggregate
+                            `(initializer ~init-fn)
+                            `(aggregator ~agg-fn)
+                            (map eval args)))))
+  
+(defmethod eval-op :count
+  [_ stream & args]
+  `(.. ~(eval stream)
+       ~(remove nil? (apply list
+                            'count
+                            (map 'eval args)))))
+
+(defmethod eval-op :reduce
+  [_ stream reducer-fn & args]
+  `(.. ~(eval stream)
+       ~(remove nil? (apply list 'reduce
+                            `(reducer ~reducer-fn)
+                            (map eval args)))))
+
+;; windows
+
+;; TODO: this just assumes you want a standard window with until set to
+;;       `(inc (* diff-ms 2))` but we should also add support for
+;;       before/until/after
+(defmethod eval-op :join-window
+  ([_ diff-ms]
+   `(.. (.. JoinWindows (of ~diff-ms))
+        (until ~(inc (* diff-ms 2))))))
 
