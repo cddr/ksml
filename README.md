@@ -11,7 +11,7 @@ Make big data as easy as HTML.
 ```clojure
 (ns com.bigdata.app
   (:require
-    [cddr.ksml.macros :refer [ksml]]))
+    [cddr.ksml.core :refer [ksml]]))
 
 (def basic-join
   (ksml [:join (fn [left right]
