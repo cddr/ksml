@@ -4,7 +4,6 @@
    [cddr.ksml.eval :as k]
    [cddr.ksml.core :refer [ksml*]]
    [clojure.spec.alpha :as s]
-   [cddr.ksml.specs :as specs]
    [cddr.ksml.core :refer [ksml*]])
   (:import
    (org.apache.kafka.streams.kstream KStream KStreamBuilder )
