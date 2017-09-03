@@ -1,13 +1,31 @@
 (ns cddr.ksml.eval
-  ""
+  "ksml is a clojure/data based representation of a kafka streams application.
+
+   This namespace defines the evaluator for ksml. At a high-level though, there
+   are only a few types of expressions in a ksml program
+
+    * self-evaluating things like e.g.
+      - numbers, strings, regexes
+      - clojure functions
+
+    * special operators (the kafka streams DSL)
+      - :stream, :table, :branch, :map etc
+
+   For each special operator, the code in here knows how to convert that operator
+   (together with it's optional args) into the underlying java interop."
   (:refer-clojure :exclude [eval reducer])
   (:require
    [clojure.string :as str])
   (:import
    (org.apache.kafka.common.serialization Serdes)
    (org.apache.kafka.streams KeyValue)
-   (org.apache.kafka.streams.processor Processor ProcessorSupplier)
+   (org.apache.kafka.streams.state Stores)
+   (org.apache.kafka.streams.processor Processor TimestampExtractor ProcessorSupplier
+                                       TopologyBuilder$AutoOffsetReset
+                                       FailOnInvalidTimestamp, LogAndSkipOnInvalidTimestamp,
+                                       UsePreviousTimeOnInvalidTimestamp, WallclockTimestampExtractor)
    (org.apache.kafka.streams.kstream
+    KStream
     KStreamBuilder
     JoinWindows
     Predicate
@@ -28,37 +46,98 @@
   [k v]
   (KeyValue. k v))
 
+(defn self-evaluating?
+  [expr]
+  (or
+   (symbol? expr)
+   (string? expr)
+   (class? expr)
+   (map? expr)
+   (instance? java.util.regex.Pattern expr)
+   (number? expr)))
+
+(defn ksml?
+  [expr]
+  (and (coll? expr)
+       (keyword? (first expr))))
+
+(declare values)
+
 (defn eval
   [expr]
-  (if (coll? expr)
-    (apply eval-op (first expr) (rest expr))
-    expr))
+  (cond
+    (self-evaluating? expr) expr
+    (ksml? expr)
+    (eval-op (first expr)
+             (values (rest expr)))
+    (ifn? expr) expr
+    :else (throw (ex-info "unknown expression: " {:expr expr}))))
+
+(defn values
+  [exprs]
+  (map eval exprs))
+
+;; primitive ops
+
+(defmethod eval-op :strs
+  [_ args]
+  `(into-array String (vector ~@args)))
 
 ;; builder ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 
+(defmethod eval-op :offset-reset
+  [_ args]
+  `(. org.apache.kafka.streams.processor.TopologyBuilder$AutoOffsetReset
+      ~(first args)))
+
+(defmethod eval-op :timestamp-extractor
+  [_ args]
+  `(new ~(first args)))
+
+(defmethod eval-op :store
+  [_ args]
+  (let [store-name (first args)
+        store-options (first (rest args))]
+    `(-> (.. org.apache.kafka.streams.state.Stores
+             (create ~store-name))
+         ~(let [k# (:with-keys store-options)]
+            `(.withKeys ~(eval k#)))
+         ~(let [v# (:with-values store-options)]
+            `(.withValues ~(eval v#)))
+         ~(let [factory# (:factory store-options)]
+            `(~factory#))
+         ~(when (:logging-disabled? store-options)
+            `(.disableLogging))
+         (.build))))
+
 (defmethod eval-op :stream
-  [_ & args]
-  `(.. *builder* (stream ~@(map eval args))))
+  [_ args]
+  `(.. *builder* (stream ~@args)))
 
 (defmethod eval-op :table
-  [_ & args]
-  `(.. *builder* (table ~@(map eval args))))
+  [_ args]
+  `(.. *builder* (table ~@args)))
 
 (defmethod eval-op :global-table
-  [_ & args]
-  `(.. *builder* (globalTable ~@(map eval args))))
+  [_ args]
+  `(.. *builder* (globalTable ~@args)))
 
 (defmethod eval-op :merge
-  [_ & args]
-  `(.. *builder* (merge (into-array KStream (vector ~@(map eval args))))))
+  [_ args]
+  `(.. *builder* (merge (into-array org.apache.kafka.streams.kstream.KStream
+                                    (vector ~@args)))))
 
 ;; serdes ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 
+(defmulti serde identity)
+
 (defmethod eval-op :serde
   ([_ id]
-   `(.. Serdes (~id)))
+   (if (keyword? id)
+     `(serde id)
+     `(.. Serdes ~id)))
   ([_ serializer deserializer]
    `(.. Serdes (serdeFrom ~serializer ~deserializer))))
 
@@ -92,8 +171,8 @@
 (defn foreach-action
   [each-fn]
   (reify ForeachAction
-    (apply [_ k v]
-      (each-fn k v))))
+     (apply [_ k v]
+       (each-fn k v))))
 
 (defn initializer
   [init-fn]
@@ -170,79 +249,87 @@
 ;;     cover the rest
 
 (defmethod eval-op :branch
-  [_ stream & predicate-fns]
-  `(.. ~(eval stream)
+  [_ args]
+  (let [[stream & predicate-fns] args]
+  `(.. ~stream
        (branch (into-array Predicate
                            (vector ~@(for [p-fn# predicate-fns]
-                                       `(predicate p-fn#)))))))
+                                       `(predicate ~p-fn#))))))))
 
 (defmethod eval-op :filter
-  [_ predicate-fn stream-or-table]
-  `(.. ~(eval stream-or-table)
-       (filter (predicate predicate-fn))))
+  [_ args]
+  (let [[predicate-fn stream-or-table] args]
+    `(.. ~stream-or-table
+         (filter (predicate ~predicate-fn)))))
 
 (defmethod eval-op :filter-not
-  [_ predicate-fn stream-or-table]
-  `(.. ~(eval stream-or-table)
-       (filterNot (predicate predicate-fn))))
+  [_ args]
+  (let [[predicate-fn stream-or-table] args]
+    `(.. ~stream-or-table
+         (filterNot (predicate ~predicate-fn)))))
 
 (defmethod eval-op :flat-map
-  [_ map-fn stream-or-table]
-  `(.. ~(eval stream-or-table)
-       (flatMap (key-value-mapper map-fn))))
+  [_ args]
+  (let [[map-fn stream-or-table] args]
+    `(.. ~stream-or-table
+         (flatMap (key-value-mapper ~map-fn)))))
 
 (defmethod eval-op :flat-map-values
-  [_ map-fn stream-or-table]
-  `(.. ~(eval stream-or-table)
-       (flatMapValues (value-mapper ~map-fn))))
+  [_ args]
+  (let [[map-fn stream-or-table] args]
+    `(.. stream-or-table
+         (flatMapValues (value-mapper ~map-fn)))))
 
 (defmethod eval-op :foreach
-  [_ stream each-fn]
-  `(.. ~(eval stream)
-       (foreach (foreach-action ~each-fn))))
+  [_ args]
+  (let [[stream each-fn] args]
+    `(.. ~stream
+         (foreach (foreach-action ~each-fn)))))
 
 (defmethod eval-op :group-by
-  [_ stream group-fn & args]
-  `(.. ~(eval stream)
-       ~(remove nil? (apply list 'groupBy
-                            `(key-value-map-fn ~group-fn)
-                            (map eval args)))))
+  [_ args]
+  (let [[stream group-fn & optional] args]
+    `(.. ~stream
+         (groupBy (key-value-mapper ~group-fn) ~@optional))))
 
 (defmethod eval-op :group-by-key
-  [_ stream & args]
-  `(.. ~(eval stream)
-       ~(remove nil? (apply list 'groupByKey
-                            (map eval args)))))
+  [_ args]
+  (let [[stream & optional] args]
+    `(.. ~stream
+         (groupByKey ~@optional))))
 
 (defmethod eval-op :join
-  [_ left right join-fn & args]
-  `(.. ~(eval left)
-       ~(remove nil? (apply list 'join
-                            (eval right)
-                            `(value-joiner ~join-fn)
-                            (map eval args)))))
+  [_ args]
+  (let [[left right join-fn & args] args]
+    `(.. ~left
+         (join ~right
+               (value-joiner ~join-fn)
+               ~@args))))
 
 (defmethod eval-op :join-global
-  [_ left right join-fn map-fn]
-  `(.. ~(eval left)
-       (join ~(eval right)
-             `(key-value-map-fn ~map-fn)
-             `(value-joiner ~join-fn))))
+  [_ args]
+  (let [[left right map-fn join-fn] args]
+    `(.. ~left
+         (join ~right
+               (key-value-mapper ~map-fn)
+               (value-joiner ~join-fn)))))
 
 (defmethod eval-op :left-join
-  [_ left right join-fn & args]
-  `(.. ~(eval left)
-       ~(remove nil? (apply list 'leftJoin
-                            (eval right)
-                            `(value-joiner ~join-fn)
-                            (map eval args)))))
+  [_ args]
+  (let [[left right join-fn & args] args]
+    `(.. ~left
+         (leftJoin ~right
+                   (value-joiner ~join-fn)
+                   ~@args))))
 
 (defmethod eval-op :left-join-global
-  [_ left right join-fn map-fn]
-  `(.. ~(eval left)
-       (join ~(eval right)
-             `(key-value-mapper ~map-fn)
-             `(value-joiner ~join-fn))))
+  [_ args]
+  (let [[left right map-fn join-fn] args]
+    `(.. ~left
+         (leftJoin ~right
+                   (key-value-mapper ~map-fn)
+                   (value-joiner ~join-fn)))))
+
 
 (defmethod eval-op :map
   [_ map-fn stream]
@@ -279,7 +366,7 @@
   ([_ stream process-fn punctuate-fn]
    `(.. ~(eval stream)
         (process (processor-supplier ~process-fn ~punctuate-fn)))))
-                         
+
 (defmethod eval-op :select-key
   [_ stream map-fn]
   `(.. ~(eval stream)
@@ -309,7 +396,7 @@
    `(.. ~(eval stream)
         (transform `(transformer-supplier ~transform)
                    (into-array String state-stores))))
-  
+
   ([_ stream state-stores transform-fn punctuate-fn]
    `(.. ~(eval stream)
         (transform `(transformer-supplier ~transform-fn ~punctuate-fn)
@@ -324,7 +411,7 @@
                             `(initializer ~init-fn)
                             `(aggregator ~agg-fn)
                             (map eval args)))))
-  
+
 (defmethod eval-op :count
   [_ stream & args]
   `(.. ~(eval stream)
@@ -345,7 +432,7 @@
 ;;       `(inc (* diff-ms 2))` but we should also add support for
 ;;       before/until/after
 (defmethod eval-op :join-window
-  ([_ diff-ms]
-   `(.. (.. JoinWindows (of ~diff-ms))
-        (until ~(inc (* diff-ms 2))))))
-
+  [_ args]
+  (let [[diff-ms & args] args]
+    `(.. (.. JoinWindows (of ~diff-ms))
+         (until ~(inc (* diff-ms 2))))))

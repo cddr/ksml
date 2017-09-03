@@ -4,10 +4,18 @@
   (:import
    (org.apache.kafka.streams.kstream KStreamBuilder)))
 
+(defn ksml*
+  [expr]
+  (eval
+   `(binding [ksml.eval/*builder* (KStreamBuilder.)]
+      (let [code# ~(ksml.eval/eval expr)]
+        (eval code#)
+        ksml.eval/*builder*))))
+
 (defmacro ksml
   [expr]
   `(binding [ksml.eval/*builder* (KStreamBuilder.)]
-     ~(ksml.eval/eval expr)))
+     ~(ksml.eval/eval ~expr)))
 
 (defmacro v->
   "Like Clojure's `->` but expects the 'forms' to be vectors"
