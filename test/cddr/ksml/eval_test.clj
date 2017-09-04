@@ -331,7 +331,7 @@
                                  (= (:id l) (:id r)))]]
 
     (testing "process"
-      (is (ksml* [:process this-stream
+      (is (ksml* [:process! this-stream
                   [:processor-supplier (fn [context k v]
                                          v)]
                   [:strs]])))
@@ -407,9 +407,9 @@
                   keySerde valSerde valSerde])))
 
     (testing "peek"
-      (is (ksml* [:peek [:foreach-action! (fn [k v]
-                                        "yolo")]
-                  this-stream])))
+      (is (ksml* [:peek! this-stream
+                  [:foreach-action (fn [k v]
+                                     "yolo")]])))
 
     (testing "print!"
       (is (ksml* [:print! [:stream #"foo"]]))

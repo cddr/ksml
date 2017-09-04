@@ -36,6 +36,8 @@
     ValueJoiner
     Transformer TransformerSupplier)))
 
+(declare eval)
+
 (def ^:dynamic *builder*)
 
 (defmacro defsyntax [name rules]
@@ -271,7 +273,7 @@
 
 (defsyntax side-effect
   {
-   :peek!      (fn [_ [stream each-fn]]
+   :peek!      (fn [stream each-fn]
                  `(.. ~stream
                       (peek ~each-fn)))
 
@@ -327,9 +329,11 @@
                        (until ~(inc (* diff-ms 2)))))
    })
 
-;; Super simple evaluator
-
-(declare eval)
+;; Super simple evaluator. In ksml, there are only 4 types of
+;; expressions
+;;
+;;   * self-evaluating (strings, numbers, functions)
+;;   * primitives
 
 (defn self-evaluating?
   [expr]
@@ -345,6 +349,28 @@
   [exprs]
   (map eval exprs))
 
+(defn application?
+  [expr]
+  (some #(% expr)
+        [mapping-operator?
+         stream-operator?
+         aggregation?
+         side-effect?
+         join?
+         global-join?
+         serde?
+         window?]))
+
+(def application
+  (merge mapping-operator
+         stream-operator
+         aggregation
+         side-effect
+         join
+         global-join
+         serde
+         window))
+
 (defn eval
   [expr]
   (cond
@@ -355,49 +381,8 @@
     (lambda? expr)                (let [[op lfn] expr]
                                     `((lambda ~op) ~lfn))
 
-    (mapping-operator? expr)      (let [[op op-fn stream & args] expr]
-                                    (apply (mapping-operator op)
-                                           (eval op-fn)
-                                           (eval stream)
+    (application? expr)           (let [[op & args] expr]
+                                    (apply (application op)
                                            (values args)))
 
-    (stream-operator? expr)       (let [[op stream & args] expr]
-                                    (apply (stream-operator op)
-                                           (eval stream)
-                                           (values args)))
-
-    (aggregation? expr)           (let [[op stream & args] expr]
-                                    (apply (aggregation op)
-                                           (eval stream)
-                                           (values args)))
-
-
-    (side-effect? expr)           (let [[op stream & args] expr]
-                                    (apply (side-effect op)
-                                           (eval stream)
-                                           (values args)))
-
-    (join? expr)                  (let [[op left right join-fn & args] expr]
-                                    (apply (join op)
-                                           (eval left)
-                                           (eval right)
-                                           (eval join-fn)
-                                           (values args)))
-
-    (global-join? expr)           (let [[op left right map-fn join-fn & args] expr]
-                                    (apply (global-join op)
-                                           (eval left)
-                                           (eval right)
-                                           (eval map-fn)
-                                           (eval join-fn)
-                                           (values args)))
-
-    (serde? expr)                 (let [[op & args] expr]
-                                    (apply (serde op)
-                                           (values args)))
-
-    (window? expr)                (let [[op diff-ms & args] expr]
-                                    (apply (window op) diff-ms args))
-
-    (ifn? expr) expr
     :else (throw (ex-info "unknown expression: " {:expr expr}))))
