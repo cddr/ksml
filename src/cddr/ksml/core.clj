@@ -14,7 +14,8 @@
 (defmacro ksml
   [expr]
   `(binding [ksml.eval/*builder* (KStreamBuilder.)]
-     ~(ksml.eval/eval ~expr)))
+     ~(ksml.eval/eval expr)
+     ksml.eval/*builder*))
 
 (defmacro v->
   "Like Clojure's `->` but expects the 'forms' to be vectors"
