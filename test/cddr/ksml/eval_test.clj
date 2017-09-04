@@ -6,7 +6,8 @@
    [clojure.spec.alpha :as s]
    [cddr.ksml.core :refer [ksml*]])
   (:import
-   (org.apache.kafka.streams.kstream KStream KStreamBuilder )
+   (org.apache.kafka.common.serialization Serde)
+   (org.apache.kafka.streams.kstream KStream KStreamBuilder)
    (org.apache.kafka.streams.processor TopologyBuilder
                                        FailOnInvalidTimestamp)))
 
@@ -55,6 +56,16 @@
   (let [topic-group (get (.topicGroups b) (int 0))]
     (= #{"foo" "bar"}
        (.sourceTopics topic-group))))
+
+(defn serde?
+  [expr]
+  (instance? Serde (eval
+                    (k/eval expr))))
+
+(deftest test-serde
+  (testing "builtin"
+    (is (serde? [:serde 'ByteArray]))
+    (is (serde? [:serde 'String]))))
 
 (deftest test-eval-stream
   (testing "from pattern"
@@ -190,7 +201,7 @@
 (def kv-map [:key-value-mapper (fn [k v]
                                  [k v])])
 (def vmap [:value-mapper (fn [v] v)])
-(def side-effect! [:foreach-action! (fn [k1 v1])])
+(def side-effect! [:foreach-action (fn [k1 v1])])
 (def xform [:transformer (fn [k v] [k v])])
 (def group-fn [:key-value-mapper (fn [v]
                                    (:part-id v))])
@@ -253,22 +264,22 @@
                   state-store])))
 
     (testing "through"
-      (is (ksml* [:through this-table keySerde valSerde "through-topic"]))
-      (is (ksml* [:through this-table keySerde valSerde "through-topic" "through-topic-state"]))
-      (is (ksml* [:through this-table "through-topic" state-store]))
-      (is (ksml* [:through this-table keySerde valSerde partitioner
+      (is (ksml* [:through! this-table keySerde valSerde "through-topic"]))
+      (is (ksml* [:through! this-table keySerde valSerde "through-topic" "through-topic-state"]))
+      (is (ksml* [:through! this-table "through-topic" state-store]))
+      (is (ksml* [:through! this-table keySerde valSerde partitioner
                   "through-topic" state-store]))
-      (is (ksml* [:through this-table keySerde valSerde partitioner
+      (is (ksml* [:through! this-table keySerde valSerde partitioner
                   "through-topic" "through-topic-state"]))
-      (is (ksml* [:through this-table keySerde valSerde "through-topic"]))
-      (is (ksml* [:through this-table keySerde valSerde "through-topic" state-store]))
-      (is (ksml* [:through this-table keySerde valSerde "through-topic" "through-topic-state"]))
-      (is (ksml* [:through this-table partitioner "through-topic"]))
-      (is (ksml* [:through this-table partitioner "through-topic" state-store]))
-      (is (ksml* [:through this-table partitioner "through-topic" "through-topic-state"]))
-      (is (ksml* [:through this-table "through-topic"]))
-      (is (ksml* [:through this-table "through-topic" state-store]))
-      (is (ksml* [:through this-table "through-topic" "through-topic-state"])))
+      (is (ksml* [:through! this-table keySerde valSerde "through-topic"]))
+      (is (ksml* [:through! this-table keySerde valSerde "through-topic" state-store]))
+      (is (ksml* [:through! this-table keySerde valSerde "through-topic" "through-topic-state"]))
+      (is (ksml* [:through! this-table partitioner "through-topic"]))
+      (is (ksml* [:through! this-table partitioner "through-topic" state-store]))
+      (is (ksml* [:through! this-table partitioner "through-topic" "through-topic-state"]))
+      (is (ksml* [:through! this-table "through-topic"]))
+      (is (ksml* [:through! this-table "through-topic" state-store]))
+      (is (ksml* [:through! this-table "through-topic" "through-topic-state"])))
 
     (testing "to!"
       (is (ksml* [:to! this-table keySerde valSerde partitioner "through-topic"]))
@@ -298,11 +309,10 @@
     (is (ksml* [:flat-map kv-map [:stream #"foos"]])))
 
   (testing "flat-map-values"
-    (ksml* [:flat-map-values vmap [:stream #"foos"]]))
+    (is (ksml* [:flat-map-values vmap [:stream #"foos"]])))
 
   (testing "foreach"
-    (is (ksml* [:foreach [:stream topicPattern]
-                side-effect!])))
+    (is (ksml* [:foreach side-effect! [:stream topicPattern]])))
 
   (testing "group-by"
     (is (ksml* [:group-by [:stream topicPattern]
@@ -401,8 +411,8 @@
                                         "yolo")]
                   this-stream])))
 
-    (testing "print"
-      (is (ksml* [:print this-stream]))
-      (is (ksml* [:print this-stream keySerde valSerde]))
-      (is (ksml* [:print this-stream keySerde valSerde "stream-name"]))
-      (is (ksml* [:print this-stream "stream-name"])))))
+    (testing "print!"
+      (is (ksml* [:print! [:stream #"foo"]]))
+      (is (ksml* [:print! this-stream keySerde valSerde]))
+      (is (ksml* [:print! this-stream keySerde valSerde "stream-name"]))
+      (is (ksml* [:print! this-stream "stream-name"])))))
