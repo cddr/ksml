@@ -42,6 +42,8 @@
                  :logging-disabled? true}])
 (def state-store-name "foo-store")
 (def queryable-store-name "foo-store")
+(def partitioner [:partitioner (fn [k v i]
+                                 0)])
 
 (defn consumes-pattern?
   [b]
@@ -87,7 +89,7 @@
                 valSerde
                 topics])))
 
-  (testing "from pattern and offset" 
+  (testing "from pattern and offset"
     (is (ksml* [:stream offset topicPattern])))
 
   (testing "from pattern with serdes and offset"
@@ -99,7 +101,7 @@
   (testing "from topics with offset"
     (is (ksml* [:stream offset topics])))
 
-  (testing "from pattern with offset and timestamp-extractor and serdes"      
+  (testing "from pattern with offset and timestamp-extractor and serdes"
     (is (ksml* [:stream offset timestampExtractor keySerde valSerde topicPattern])))
 
   (testing "from topics with offset and timestamp-extractor and serdes"
@@ -126,19 +128,19 @@
 
   (testing "from topic with timestamp extractor and serdes and state-store name"
     (is (ksml* [:table timestampExtractor keySerde valSerde topic state-store-name])))
-  
+
   (testing "from topic with timestamp extractor and state-store name"
     (is (ksml* [:table timestampExtractor topic state-store-name])))
-  
+
   (testing "from topic with offset and serdes"
     (is (ksml* [:table offset keySerde valSerde topic])))
-  
+
   (testing "from topic with offset and state-store name"
     (is (ksml* [:table offset topic state-store-name])))
-  
+
   (testing "from topic with offset"
     (is (ksml* [:table offset topic])))
-  
+
   (testing "from topic with offset and state-store supplier"
     (is (ksml* [:table offset topic state-store])))
 
@@ -179,19 +181,105 @@
 (deftest test-merge
   (let [foo [:stream #"foos"]
         bar [:stream #"bar"]]
-  
+
     (testing "merge streams"
       (ksml* [:merge foo bar]))))
 
-(def allow-all (fn [k v] true))
-(def allow-none (fn [k v] false))
-(def kv-map (fn [k v]
-              [k v]))
-(def vmap (fn [v] v))
-(def side-effect! (fn [k1 v1]))
-(def xform (fn [k v] [k v]))
-(def group-fn (fn [k v]
-                (:part-id v)))
+(def allow-all [:predicate (fn [k v] true)])
+(def allow-none [:predicate (fn [k v] false)])
+(def kv-map [:key-value-mapper (fn [k v]
+                                 [k v])])
+(def vmap [:value-mapper (fn [v] v)])
+(def side-effect! [:foreach-action! (fn [k1 v1])])
+(def xform [:transformer (fn [k v] [k v])])
+(def group-fn [:key-value-mapper (fn [v]
+                                   (:part-id v))])
+
+;; (cddr.ksml.eval/eval
+;;  [:value-mapper (fn [v]
+;;                   v)])
+
+(deftest test-ktable
+  (let [this-table [:table "left"]
+        other-stream [:stream #"right"]
+        other-global-table [:global-table keySerde valSerde "lookup"]
+        other-table [:table "right"]
+        join-fn [:value-joiner (fn [l r]
+                                 (= (:id l) (:id r)))]]
+
+    (testing "filter"
+      (is (ksml* [:filter allow-all [:table topic]]))
+      (is (ksml* [:filter allow-all [:table topic] "filtered-topic"]))
+      (is (ksml* [:filter allow-all [:table topic] state-store])))
+
+    (testing "filter-not"
+      (is (ksml* [:filter-not allow-none [:table topic]]))
+      (is (ksml* [:filter-not allow-all [:table topic] "filtered-topic"]))
+      (is (ksml* [:filter-not allow-all [:table topic] state-store])))
+
+    (testing "group-by"
+      (is (ksml* [:group-by [:table topic]
+                  kv-map]))
+
+      (is (ksml* [:group-by [:table topic]
+                  kv-map
+                  keySerde
+                  valSerde])))
+
+    (testing "join"
+      (is (ksml* [:join this-table other-table join-fn]))
+      (is (ksml* [:join this-table other-table join-fn valSerde "join-store"]))
+      (is (ksml* [:join this-table other-table join-fn state-store])))
+
+    (testing "left join"
+      (is (ksml* [:left-join this-table other-table join-fn]))
+      (is (ksml* [:left-join this-table other-table join-fn valSerde "join-store"]))
+      (is (ksml* [:left-join this-table other-table join-fn state-store])))
+
+    (testing "map values"
+      (is (ksml* [:map-values vmap this-table]))
+      (is (ksml* [:map-values vmap this-table "map-store"]))
+      (is (ksml* [:map-values vmap this-table state-store])))
+
+    (testing "outer join"
+      (is (ksml* [:outer-join this-table other-table
+                  join-fn]))
+      (is (ksml* [:outer-join this-table other-table
+                  join-fn
+                  valSerde
+                  "outer-join-store"]))
+      (is (ksml* [:outer-join this-table other-table
+                  join-fn
+                  state-store])))
+
+    (testing "through"
+      (is (ksml* [:through this-table keySerde valSerde "through-topic"]))
+      (is (ksml* [:through this-table keySerde valSerde "through-topic" "through-topic-state"]))
+      (is (ksml* [:through this-table "through-topic" state-store]))
+      (is (ksml* [:through this-table keySerde valSerde partitioner
+                  "through-topic" state-store]))
+      (is (ksml* [:through this-table keySerde valSerde partitioner
+                  "through-topic" "through-topic-state"]))
+      (is (ksml* [:through this-table keySerde valSerde "through-topic"]))
+      (is (ksml* [:through this-table keySerde valSerde "through-topic" state-store]))
+      (is (ksml* [:through this-table keySerde valSerde "through-topic" "through-topic-state"]))
+      (is (ksml* [:through this-table partitioner "through-topic"]))
+      (is (ksml* [:through this-table partitioner "through-topic" state-store]))
+      (is (ksml* [:through this-table partitioner "through-topic" "through-topic-state"]))
+      (is (ksml* [:through this-table "through-topic"]))
+      (is (ksml* [:through this-table "through-topic" state-store]))
+      (is (ksml* [:through this-table "through-topic" "through-topic-state"])))
+
+    (testing "to!"
+      (is (ksml* [:to! this-table keySerde valSerde partitioner "through-topic"]))
+      (is (ksml* [:to! this-table keySerde valSerde "through-topic"]))
+      (is (ksml* [:to! this-table partitioner "through-topic"]))
+      (is (ksml* [:to! this-table "through-topic"])))
+
+    (testing "to-stream"
+      (is (ksml* [:to-stream this-table]))
+      (is (ksml* [:to-stream this-table kv-map])))))
+
 
 (deftest test-kstream
   (testing "branch"
@@ -200,16 +288,17 @@
                 allow-none])))
 
   (testing "filter"
+    (is (ksml* [:filter allow-all [:stream topicPattern]]))
     (is (ksml* [:filter allow-all [:stream topicPattern]])))
 
   (testing "filter-not"
     (is (ksml* [:filter-not allow-none [:stream topicPattern]])))
 
   (testing "flat-map"
-    (is (ksml* [:flat-map xform [:stream #"foos"]])))
+    (is (ksml* [:flat-map kv-map [:stream #"foos"]])))
 
   (testing "flat-map-values"
-    (is (ksml* [:flat-map vmap [:stream #"foos"]])))
+    (ksml* [:flat-map-values vmap [:stream #"foos"]]))
 
   (testing "foreach"
     (is (ksml* [:foreach [:stream topicPattern]
@@ -224,18 +313,19 @@
                 keySerde
                 valSerde])))
 
-  (testing "group-by-key"
-    (is (ksml* [:group-by-key [:stream topicPattern]]))
-    (is (ksml* [:group-by-key [:stream topicPattern]
-                keySerde
-                valSerde])))
-
   (let [this-stream [:stream #"left"]
         other-stream [:stream #"right"]
         other-global-table [:global-table keySerde valSerde "lookup"]
         other-table [:table "right"]
-        join-fn (fn [l r]
-                  (= (:id l) (:id r)))]
+        join-fn [:value-joiner (fn [l r]
+                                 (= (:id l) (:id r)))]]
+
+    (testing "process"
+      (is (ksml* [:process this-stream
+                  [:processor-supplier (fn [context k v]
+                                         v)]
+                  [:strs]])))
+
 
     (testing "join global table"
       (is (ksml* [:join-global this-stream other-global-table
@@ -256,22 +346,22 @@
                   valSerde])))
 
     (testing "join table"
-      (is (ksml* [:join this-stream other-table])))
-           
+      (is (ksml* [:join this-stream other-table join-fn])))
+
     (testing "join table with serdes"
-      (is (ksml* [:join this-stream other-table keySerde valSerde valSerde])))
-    
+      (is (ksml* [:join this-stream other-table join-fn keySerde valSerde])))
+
     (testing "left join global table"
       (is (ksml* [:left-join-global this-stream other-global-table
                   kv-map
                   join-fn])))
-    
+
     (testing "left join stream with window"
       (is (ksml* [:left-join this-stream other-stream
                   join-fn
                   join-window])))
 
-      
+
     (testing "left join stream with window and serdes"
       (is (ksml* [:left-join this-stream other-stream
                   join-fn
@@ -283,14 +373,36 @@
     (testing "left join table"
       (is (ksml* [:left-join this-stream other-table
                   join-fn])))
-                  
+
     (testing "left join table with serdes"
       (is (ksml* [:left-join this-stream other-table
                   join-fn
                   keySerde
-                  valSerde])))))
-              
+                  valSerde])))
 
+    (testing "map"
+      (is (ksml* [:map kv-map
+                  [:stream #"words"]])))
 
-  
-  
+    (testing "map values"
+      (is (ksml* [:map-values vmap
+                  [:stream topicPattern]])))
+
+    (testing "outer join"
+      (is (ksml* [:outer-join this-stream other-stream
+                  join-fn
+                  join-window]))
+      (is (ksml* [:outer-join this-stream other-stream
+                  join-fn join-window
+                  keySerde valSerde valSerde])))
+
+    (testing "peek"
+      (is (ksml* [:peek [:foreach-action! (fn [k v]
+                                        "yolo")]
+                  this-stream])))
+
+    (testing "print"
+      (is (ksml* [:print this-stream]))
+      (is (ksml* [:print this-stream keySerde valSerde]))
+      (is (ksml* [:print this-stream keySerde valSerde "stream-name"]))
+      (is (ksml* [:print this-stream "stream-name"])))))

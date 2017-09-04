@@ -21,6 +21,7 @@
    (org.apache.kafka.streams KeyValue)
    (org.apache.kafka.streams.state Stores)
    (org.apache.kafka.streams.processor Processor TimestampExtractor ProcessorSupplier
+                                       StreamPartitioner
                                        TopologyBuilder$AutoOffsetReset
                                        FailOnInvalidTimestamp, LogAndSkipOnInvalidTimestamp,
                                        UsePreviousTimeOnInvalidTimestamp, WallclockTimestampExtractor)
@@ -150,11 +151,21 @@
     (test [_ k v]
       (boolean (pred-fn k v)))))
 
+(defmethod eval-op :predicate
+  [_ args]
+  (let [[map-fn] args]
+    `(predicate ~map-fn)))
+
 (defn key-value-mapper
   [map-fn]
   (reify KeyValueMapper
     (apply [_ k v]
       (apply key-value (map-fn k v)))))
+
+(defmethod eval-op :key-value-mapper
+  [_ args]
+  (let [[map-fn] args]
+    `(key-value-mapper ~map-fn)))
 
 (defn value-mapper
   [map-fn]
@@ -162,17 +173,32 @@
     (apply [_ v]
       (map-fn v))))
 
+(defmethod eval-op :value-mapper
+  [_ args]
+  (let [[map-fn] args]
+    `(value-mapper ~map-fn)))
+
 (defn value-joiner
   [join-fn]
   (reify ValueJoiner
     (apply [_ left right]
       (join-fn left right))))
 
+(defmethod eval-op :value-joiner
+  [_ args]
+  (let [[join-fn] args]
+    `(value-joiner ~join-fn)))
+
 (defn foreach-action
   [each-fn]
   (reify ForeachAction
      (apply [_ k v]
        (each-fn k v))))
+
+(defmethod eval-op :foreach-action!
+  [_ args]
+  (let [[each-fn] args]
+    `(foreach-action ~each-fn)))
 
 (defn initializer
   [init-fn]
@@ -208,6 +234,13 @@
            (process [_ k v]
              (process-fn @ctx k v))))))))
 
+(defmethod eval-op :processor-supplier
+  [_ args]
+  (let [[process-fn punctuate-fn] args]
+    (if punctuate-fn
+      `(processor-supplier ~process-fn ~punctuate-fn)
+      `(processor-supplier ~process-fn))))
+
 (defn transformer-supplier
   ([transform-fn]
    (transformer-supplier transform-fn (constantly nil)))
@@ -223,6 +256,17 @@
              (punctuate-fn @ctx ts))
            (transform [_ k v]
              (transform-fn @ctx k v))))))))
+
+(defn partitioner
+  [partition-fn]
+  (reify StreamPartitioner
+    (partition [this k v i]
+      (partition-fn k v i))))
+
+(defmethod eval-op :partitioner
+  [_ args]
+  (let [[partition-fn] args]
+    `(partitioner ~partition-fn)))
 
 ;; kstream/ktable ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -253,44 +297,43 @@
   (let [[stream & predicate-fns] args]
   `(.. ~stream
        (branch (into-array Predicate
-                           (vector ~@(for [p-fn# predicate-fns]
-                                       `(predicate ~p-fn#))))))))
+                           (vector ~@predicate-fns))))))
 
 (defmethod eval-op :filter
   [_ args]
-  (let [[predicate-fn stream-or-table] args]
+  (let [[predicate-fn stream-or-table & args] args]
     `(.. ~stream-or-table
-         (filter (predicate ~predicate-fn)))))
+         (filter ~predicate-fn ~@args))))
 
 (defmethod eval-op :filter-not
   [_ args]
-  (let [[predicate-fn stream-or-table] args]
+  (let [[predicate-fn stream-or-table & args] args]
     `(.. ~stream-or-table
-         (filterNot (predicate ~predicate-fn)))))
+         (filterNot ~predicate-fn ~@args))))
 
 (defmethod eval-op :flat-map
   [_ args]
   (let [[map-fn stream-or-table] args]
     `(.. ~stream-or-table
-         (flatMap (key-value-mapper ~map-fn)))))
+         (flatMap ~map-fn))))
 
 (defmethod eval-op :flat-map-values
   [_ args]
   (let [[map-fn stream-or-table] args]
-    `(.. stream-or-table
-         (flatMapValues (value-mapper ~map-fn)))))
+    `(.. ~stream-or-table
+         (flatMapValues ~map-fn))))
 
 (defmethod eval-op :foreach
   [_ args]
   (let [[stream each-fn] args]
     `(.. ~stream
-         (foreach (foreach-action ~each-fn)))))
+         (foreach ~each-fn))))
 
 (defmethod eval-op :group-by
   [_ args]
   (let [[stream group-fn & optional] args]
     `(.. ~stream
-         (groupBy (key-value-mapper ~group-fn) ~@optional))))
+         (groupBy ~group-fn ~@optional))))
 
 (defmethod eval-op :group-by-key
   [_ args]
@@ -301,9 +344,12 @@
 (defmethod eval-op :join
   [_ args]
   (let [[left right join-fn & args] args]
+    (assert left)
+    (assert right)
+    (assert join-fn "Misssing required argument")
     `(.. ~left
          (join ~right
-               (value-joiner ~join-fn)
+               ~join-fn
                ~@args))))
 
 (defmethod eval-op :join-global
@@ -311,15 +357,15 @@
   (let [[left right map-fn join-fn] args]
     `(.. ~left
          (join ~right
-               (key-value-mapper ~map-fn)
-               (value-joiner ~join-fn)))))
+               ~map-fn
+               ~join-fn))))
 
 (defmethod eval-op :left-join
   [_ args]
   (let [[left right join-fn & args] args]
     `(.. ~left
          (leftJoin ~right
-                   (value-joiner ~join-fn)
+                   ~join-fn
                    ~@args))))
 
 (defmethod eval-op :left-join-global
@@ -327,104 +373,107 @@
   (let [[left right map-fn join-fn] args]
     `(.. ~left
          (leftJoin ~right
-                   (key-value-mapper ~map-fn)
-                   (value-joiner ~join-fn)))))
+                   ~map-fn
+                   ~join-fn))))
 
 
 (defmethod eval-op :map
-  [_ map-fn stream]
-  `(.. ~(eval stream)
-       (map (key-value-mapper ~map-fn))))
+  [_ args]
+  (let [[map-fn stream] args]
+    `(.. ~stream
+         (map ~map-fn))))
 
 (defmethod eval-op :map-values
-  [_ map-fn stream]
-  `(.. ~(eval stream)
-       (mapValues (value-mapper ~map-fn))))
+  [_ args]
+  (let [[map-fn stream] args]
+    `(.. ~stream
+         (mapValues ~map-fn))))
 
 (defmethod eval-op :outer-join
-  [_ left right join-fn & args]
-  `(.. ~(eval left)
-       ~(remove nil? (apply list 'outerJoin
-                            (eval right)
-                            `(value-joiner ~join-fn)
-                            (map eval args)))))
+  [_ args]
+  (let [[left right join-fn & args] args]
+    `(.. ~left
+         (outerJoin ~right
+                    ~join-fn
+                    ~@args))))
+
 (defmethod eval-op :peek
-  [_ each-fn stream]
-  `(.. ~(eval stream)
-       (peek (foreach-action ~each-fn))))
+  [_ args]
+  (let [[each-fn stream] args]
+    `(.. ~stream
+         (peek ~each-fn))))
 
 (defmethod eval-op :print
-  [_ stream & args]
-  `(.. ~(eval stream)
-       ~(remove nil? (apply list 'print
-                            (map eval args)))))
+  [_ args]
+  (let [[stream & args] args]
+    `(.. ~stream
+         (print ~@args))))
 
 (defmethod eval-op :process
-  ([_ stream process-fn]
-   `(.. ~(eval stream)
-        (process (processor-supplier ~process-fn))))
-  ([_ stream process-fn punctuate-fn]
-   `(.. ~(eval stream)
-        (process (processor-supplier ~process-fn ~punctuate-fn)))))
+  [_ args]
+  (let [[stream & args] args]
+    `(.. ~stream
+         (process ~@args))))
 
 (defmethod eval-op :select-key
-  [_ stream map-fn]
-  `(.. ~(eval stream)
-       (selectKey (key-value-mapper ~map-fn))))
+  [_ args]
+  (let [[stream map-fn & args] args]
+    `(.. ~stream
+         (selectKey ~map-fn))))
 
 (defmethod eval-op :through
-  [_ stream & args]
-  `(.. ~(eval stream)
-       ~(remove nil? (apply list
-                            'through
-                            (map eval args)))))
+  [_ args]
+  (let [[stream & args] args]
+    `(.. ~stream
+         (through ~@args))))
 
 (defmethod eval-op :to!
-  [_ stream & args]
-  `(.. ~(eval stream)
-       ~(remove nil? (apply list
-                            'to
-                            (map eval args)))))
+  [_ args]
+  (let [[stream & args] args]
+    `(.. ~stream
+         (to ~@args))))
 
-(defmethod eval-op :to-kstream
-  [_ table]
-  `(.. ~(eval table)
-       (toStream)))
+(defmethod eval-op :to-stream
+  [_ args]
+  (let [[table & args] args]
+    `(.. ~table
+         (toStream ~@args))))
 
 (defmethod eval-op :transform
-  ([_ stream state-stores transform-fn]
-   `(.. ~(eval stream)
-        (transform `(transformer-supplier ~transform)
-                   (into-array String state-stores))))
+  [_ args]
+  (let [[stream & args] args]
+    `(.. ~stream
+         (transform ~@args))))
 
-  ([_ stream state-stores transform-fn punctuate-fn]
-   `(.. ~(eval stream)
-        (transform `(transformer-supplier ~transform-fn ~punctuate-fn)
-                   (into-array String state-stores)))))
+  ;; ([_ stream state-stores transform-fn]
+  ;;  `(.. ~(eval stream)
+  ;;       (transform `(transformer-supplier ~transform)
+  ;;                  (into-array String state-stores))))
+
+  ;; ([_ stream state-stores transform-fn punctuate-fn]
+  ;;  `(.. ~(eval stream)
+  ;;       (transform `(transformer-supplier ~transform-fn ~punctuate-fn)
+  ;;                  (into-array String state-stores)))))
 
 ;; grouped streams/tables
 
 (defmethod eval-op :aggregate
-  [_ stream init-fn agg-fn & args]
-  `(.. ~(eval stream)
-       ~(remove nil? (apply list 'aggregate
-                            `(initializer ~init-fn)
-                            `(aggregator ~agg-fn)
-                            (map eval args)))))
+  [_ args]
+  (let [[stream & args] args]
+    `(.. ~stream
+         (aggregate ~@args))))
 
 (defmethod eval-op :count
-  [_ stream & args]
-  `(.. ~(eval stream)
-       ~(remove nil? (apply list
-                            'count
-                            (map 'eval args)))))
+  [_ args]
+  (let [[stream & args] args]
+    `(.. ~stream
+         (count ~@args))))
 
 (defmethod eval-op :reduce
-  [_ stream reducer-fn & args]
-  `(.. ~(eval stream)
-       ~(remove nil? (apply list 'reduce
-                            `(reducer ~reducer-fn)
-                            (map eval args)))))
+  [_ args]
+  (let [[stream & args] args]
+    `(.. ~stream
+         (reduce ~@args))))
 
 ;; windows
 

@@ -8,9 +8,8 @@
   [expr]
   (eval
    `(binding [ksml.eval/*builder* (KStreamBuilder.)]
-      (let [code# ~(ksml.eval/eval expr)]
-        (eval code#)
-        ksml.eval/*builder*))))
+      ~(ksml.eval/eval expr)
+      ksml.eval/*builder*)))
 
 (defmacro ksml
   [expr]
