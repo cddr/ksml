@@ -206,10 +206,6 @@
 (def group-fn [:key-value-mapper (fn [v]
                                    (:part-id v))])
 
-;; (cddr.ksml.eval/eval
-;;  [:value-mapper (fn [v]
-;;                   v)])
-
 (deftest test-ktable
   (let [this-table [:table "left"]
         other-stream [:stream #"right"]
@@ -219,14 +215,14 @@
                                  (= (:id l) (:id r)))]]
 
     (testing "filter"
-      (is (ksml* [:filter allow-all [:table topic]]))
-      (is (ksml* [:filter allow-all [:table topic] "filtered-topic"]))
-      (is (ksml* [:filter allow-all [:table topic] state-store])))
+      (is (ksml* [:filter [:table topic] allow-all]))
+      (is (ksml* [:filter [:table topic] allow-all "filtered-topic"]))
+      (is (ksml* [:filter [:table topic] allow-all state-store])))
 
     (testing "filter-not"
-      (is (ksml* [:filter-not allow-none [:table topic]]))
-      (is (ksml* [:filter-not allow-all [:table topic] "filtered-topic"]))
-      (is (ksml* [:filter-not allow-all [:table topic] state-store])))
+      (is (ksml* [:filter-not [:table topic] allow-none]))
+      (is (ksml* [:filter-not [:table topic] allow-all "filtered-topic"]))
+      (is (ksml* [:filter-not [:table topic] allow-all state-store])))
 
     (testing "group-by"
       (is (ksml* [:group-by [:table topic]
@@ -248,9 +244,9 @@
       (is (ksml* [:left-join this-table other-table join-fn state-store])))
 
     (testing "map values"
-      (is (ksml* [:map-values vmap this-table]))
-      (is (ksml* [:map-values vmap this-table "map-store"]))
-      (is (ksml* [:map-values vmap this-table state-store])))
+      (is (ksml* [:map-values this-table vmap]))
+      (is (ksml* [:map-values this-table vmap "map-store"]))
+      (is (ksml* [:map-values this-table vmap state-store])))
 
     (testing "outer join"
       (is (ksml* [:outer-join this-table other-table
@@ -299,20 +295,20 @@
                 allow-none])))
 
   (testing "filter"
-    (is (ksml* [:filter allow-all [:stream topicPattern]]))
-    (is (ksml* [:filter allow-all [:stream topicPattern]])))
+    (is (ksml* [:filter [:stream topicPattern] allow-all]))
+    (is (ksml* [:filter [:stream topicPattern] allow-all])))
 
   (testing "filter-not"
-    (is (ksml* [:filter-not allow-none [:stream topicPattern]])))
+    (is (ksml* [:filter-not [:stream topicPattern] allow-none])))
 
   (testing "flat-map"
-    (is (ksml* [:flat-map kv-map [:stream #"foos"]])))
+    (is (ksml* [:flat-map [:stream #"foos"] kv-map])))
 
   (testing "flat-map-values"
-    (is (ksml* [:flat-map-values vmap [:stream #"foos"]])))
+    (is (ksml* [:flat-map-values [:stream #"foos"] vmap])))
 
   (testing "foreach"
-    (is (ksml* [:foreach side-effect! [:stream topicPattern]])))
+    (is (ksml* [:foreach [:stream topicPattern] side-effect!])))
 
   (testing "group-by"
     (is (ksml* [:group-by [:stream topicPattern]
@@ -391,12 +387,10 @@
                   valSerde])))
 
     (testing "map"
-      (is (ksml* [:map kv-map
-                  [:stream #"words"]])))
+      (is (ksml* [:map [:stream #"words"] kv-map])))
 
     (testing "map values"
-      (is (ksml* [:map-values vmap
-                  [:stream topicPattern]])))
+      (is (ksml* [:map-values [:stream topicPattern] vmap])))
 
     (testing "outer join"
       (is (ksml* [:outer-join this-stream other-stream

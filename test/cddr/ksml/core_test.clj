@@ -10,4 +10,4 @@
            [:baz])))
 
 (deftest test-ksml
-  (is (ksml [:stream #"foo"])))
+  (is (ksml [:stream #"foo"])

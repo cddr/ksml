@@ -25,16 +25,13 @@
                                        TopologyBuilder$AutoOffsetReset
                                        FailOnInvalidTimestamp, LogAndSkipOnInvalidTimestamp,
                                        UsePreviousTimeOnInvalidTimestamp, WallclockTimestampExtractor)
-   (org.apache.kafka.streams.kstream
-    KStream
-    KStreamBuilder
-    JoinWindows
-    Predicate
-    Initializer Aggregator Reducer
-    ForeachAction
-    ValueMapper KeyValueMapper
-    ValueJoiner
-    Transformer TransformerSupplier)))
+   (org.apache.kafka.streams.kstream KStream KStreamBuilder JoinWindows TimeWindows
+                                     Predicate
+                                     Initializer Aggregator Reducer
+                                     ForeachAction
+                                     ValueMapper KeyValueMapper
+                                     ValueJoiner
+                                     Transformer TransformerSupplier)))
 
 (declare eval)
 
@@ -186,36 +183,36 @@
 
 (defsyntax mapping-operator
   {
-   :filter          (fn [predicate-fn stream & args]
+   :filter          (fn [stream predicate-fn & args]
                       `(.. ~stream
                            (filter ~predicate-fn ~@args)))
 
-   :filter-not      (fn [predicate-fn stream & args]
+   :filter-not      (fn [stream predicate-fn & args]
                       `(.. ~stream
                            (filterNot ~predicate-fn ~@args)))
 
-   :flat-map        (fn [map-fn stream & args]
+   :flat-map        (fn [stream map-fn & args]
                       `(.. ~stream
                            (flatMap ~map-fn)))
 
-   :flat-map-values (fn [map-fn stream & args]
+   :flat-map-values (fn [stream map-fn & args]
                       `(.. ~stream
                            (flatMapValues ~map-fn)))
 
-   :foreach         (fn [each-fn stream & args]
+   :foreach         (fn [stream each-fn & args]
                       `(.. ~stream
                            (foreach ~each-fn)))
 
 
-   :map             (fn [map-fn stream & args]
+   :map             (fn [stream map-fn & args]
                       `(.. ~stream
                            (map ~map-fn)))
 
-   :map-values      (fn [map-fn stream & args]
+   :map-values      (fn [stream map-fn & args]
                       `(.. ~stream
                            (mapValues ~map-fn)))
 
-   :select-key      (fn [map-fn stream & args]
+   :select-key      (fn [stream map-fn & args]
                       `(.. ~stream
                            (selectKey ~map-fn)))
    })
@@ -325,8 +322,10 @@
 (defsyntax window
   {
    :join-window (fn [diff-ms & args]
-                  `(.. (.. JoinWindows (of ~diff-ms))
-                       (until ~(inc (* diff-ms 2)))))
+                  `(.. (.. JoinWindows (of ~(long diff-ms)))
+                       (until ~(long (inc (* diff-ms 2))))))
+   :time-window (fn [ms & args]
+                  `(.. TimeWindows (of ~(long ms))))
    })
 
 ;; Super simple evaluator. In ksml, there are only 4 types of
@@ -349,19 +348,7 @@
   [exprs]
   (map eval exprs))
 
-(defn application?
-  [expr]
-  (some #(% expr)
-        [mapping-operator?
-         stream-operator?
-         aggregation?
-         side-effect?
-         join?
-         global-join?
-         serde?
-         window?]))
-
-(def application
+(defsyntax application
   (merge mapping-operator
          stream-operator
          aggregation
@@ -378,8 +365,8 @@
     (primitive? expr)             (let [[op & args] expr]
                                     ((primitive op) (values args)))
 
-    (lambda? expr)                (let [[op lfn] expr]
-                                    `((lambda ~op) ~lfn))
+    (lambda? expr)                (let [[op function] expr]
+                                    `((lambda ~op) ~function))
 
     (application? expr)           (let [[op & args] expr]
                                     (apply (application op)
