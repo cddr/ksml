@@ -8,6 +8,3 @@
       (v-> [:foo]
            [:bar]
            [:baz])))
-
-(deftest test-ksml
-  (is (ksml [:stream #"foo"])

@@ -2,8 +2,6 @@
   (:require
    [clojure.test :refer :all]
    [cddr.ksml.eval :as k]
-   [cddr.ksml.core :refer [ksml*]]
-   [clojure.spec.alpha :as s]
    [cddr.ksml.core :refer [ksml*]])
   (:import
    (org.apache.kafka.common.serialization Serde)

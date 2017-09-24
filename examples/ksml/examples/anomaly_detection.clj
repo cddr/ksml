@@ -1,4 +1,4 @@
-(ns cddr.ksml.examples.anomaly-detection
+(ns ksml.examples.anomaly-detection
   (:require
    [cddr.ksml.core :as k :refer [v->]])
   (:import
