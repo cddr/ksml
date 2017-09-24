@@ -1,10 +1,20 @@
 (ns ksml.examples.anomaly-detection
   (:require
-   [cddr.ksml.core :as k :refer [v->]])
+   [cddr.ksml.core :as k :refer [v->]]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
+   [clojure.tools.logging :as log]
+   [unilog.config  :refer [start-logging!]])
   (:import
    (org.apache.kafka.streams KafkaStreams)
    (org.apache.kafka.streams StreamsConfig)
    (org.apache.kafka.common.serialization Serdes)))
+
+(let [logging (-> "logging.edn"
+                  (io/resource)
+                  (slurp)
+                  (edn/read-string))]
+  (start-logging! logging))
 
 (def string-serde (-> (Serdes/String)
                       (.getClass)
@@ -50,7 +60,7 @@
       (.cleanUp)
       (.start))
 
-    (println "Started anomaly detection streams")
+    (log/info "Started anomaly detection streams")
 
     (doto (Runtime/getRuntime)
       (.addShutdownHook (Thread. #(.close streams))))))

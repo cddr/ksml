@@ -4,10 +4,11 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [org.apache.kafka/kafka-streams "0.11.0.0"]
-                 [aleph "0.4.3"]]
-  :source-paths ["src" "examples"]
+                 [org.apache.kafka/kafka-streams "0.11.0.0"]]
   :profiles
-  {:dev
-   {:dependencies [[org.apache.kafka/kafka-streams "0.11.0.0" :classifier "test"]
-                   [org.clojure/test.check "0.9.0"]]}})
+  {:examples
+   {:source-paths ["src" "examples"]
+    :resource-paths ["resources" "examples/resources"]
+    :dependencies [[bidi "2.1.2"]
+                   [yada/lean "1.2.8"]
+                   [spootnik/unilog "0.7.20"]]}})

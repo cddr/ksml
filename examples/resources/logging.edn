@@ -1,0 +1,8 @@
+{:level   :info
+ :console true
+ :encoder :pattern
+ :pattern "%p [%d] %t - %c %m%n"
+ ;; kafka/zookeeper are super verbose which is great when something goes
+ ;; wrong but a bit too much noise for dev mode
+ :overrides  {"org.apache.kafka"      :error
+              "org.apache.zookeeper"  :error}}
