@@ -2,9 +2,10 @@
   (:require
    [clojure.test :refer :all]
    [cddr.ksml.eval :as k]
-   [cddr.ksml.core :refer [ksml*]])
+   [cddr.ksml.core :refer [ksml* v->]])
   (:import
-   (org.apache.kafka.common.serialization Serde)
+   (java.io ByteArrayInputStream)
+   (org.apache.kafka.common.serialization Serde Serializer Deserializer)
    (org.apache.kafka.streams.kstream KStream KStreamBuilder)
    (org.apache.kafka.streams.processor TopologyBuilder
                                        FailOnInvalidTimestamp)))
@@ -43,6 +44,9 @@
 (def queryable-store-name "foo-store")
 (def partitioner [:partitioner (fn [k v i]
                                  0)])
+(def grouped-stream
+  (v-> [:stream topicPattern]
+       [:group-by-key]))
 
 (defn consumes-pattern?
   [b]
@@ -203,6 +207,15 @@
 (def xform [:transformer (fn [k v] [k v])])
 (def group-fn [:key-value-mapper (fn [v]
                                    (:part-id v))])
+
+(def edn-serde
+  [:serde
+   [:serializer (fn [this topic data]
+                  (when data
+                    (.getBytes (pr-str data))))]
+   [:deserializer (fn [this topic data]
+                     (when data
+                       (clojure.edn/read (ByteArrayInputStream. data))))]])
 
 (deftest test-ktable
   (let [this-table [:table "left"]

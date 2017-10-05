@@ -17,7 +17,7 @@
   (:require
    [clojure.string :as str])
   (:import
-   (org.apache.kafka.common.serialization Serdes)
+   (org.apache.kafka.common.serialization Serializer Deserializer Serdes)
    (org.apache.kafka.streams KeyValue)
    (org.apache.kafka.streams.state Stores)
    (org.apache.kafka.streams.processor Processor TimestampExtractor ProcessorSupplier
@@ -27,7 +27,7 @@
                                        UsePreviousTimeOnInvalidTimestamp, WallclockTimestampExtractor)
    (org.apache.kafka.streams.kstream KStream KStreamBuilder JoinWindows TimeWindows
                                      Predicate
-                                     Initializer Aggregator Reducer
+                                     Initializer Aggregator Reducer Merger
                                      ForeachAction
                                      ValueMapper KeyValueMapper
                                      ValueJoiner
@@ -91,6 +91,20 @@
 
 (defsyntax serde
   {
+   :serializer (fn [serialize-fn]
+                 (reify Serializer
+                   (close [this])
+                   (configure [this configs key?])
+                   (serialize [this topic data]
+                     (serialize-fn this topic data))))
+
+   :deserializer (fn [deserialize-fn]
+                   (reify Deserializer
+                     (close [this])
+                     (configure [this configs key?])
+                     (deserialize [this topic data]
+                       (deserialize-fn this topic data))))
+
    :serde (fn
             ([id]
              (if (keyword? id)
@@ -139,6 +153,11 @@
                            (reify Aggregator
                              (apply [_ k v agg]
                                (agg-fn agg [k v]))))
+
+   :merger               (fn [merge-fn]
+                           (reify Merger
+                             (apply [_ k agg1 agg2]
+                               (merge-fn k agg1 agg2))))
 
    :reducer              (fn [reduce-fn]
                            (reify Reducer
@@ -212,9 +231,9 @@
                       `(.. ~stream
                            (mapValues ~map-fn)))
 
-   :select-key      (fn [stream map-fn & args]
+   :select-key      (fn [stream key-fn & args]
                       `(.. ~stream
-                           (selectKey ~map-fn)))
+                           (selectKey ~key-fn)))
    })
 
 (defsyntax stream-operator
@@ -364,6 +383,9 @@
     (self-evaluating? expr)       expr
     (primitive? expr)             (let [[op & args] expr]
                                     ((primitive op) (values args)))
+
+    (serde? expr)                 (let [[op function] expr]
+                                    `((serde ~op) ~function))
 
     (lambda? expr)                (let [[op function] expr]
                                     `((lambda ~op) ~function))
