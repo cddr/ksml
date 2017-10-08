@@ -89,30 +89,33 @@
 
 (defmulti find-serde identity)
 
+(defmethod find-serde :byte-array
+  [id]
+  `(.. Serdes ~'ByteArray))
+
+(defmethod find-serde :string
+  [id]
+  `(.. Serdes ~'String))
+
 (defsyntax serde
   {
-   :serializer (fn [serialize-fn]
-                 (reify Serializer
-                   (close [this])
-                   (configure [this configs key?])
-                   (serialize [this topic data]
-                     (serialize-fn this topic data))))
+   ;; :serializer (fn [serialize-fn]
+   ;;               (reify Serializer
+   ;;                 (close [this])
+   ;;                 (configure [this configs key?])
+   ;;                 (serialize [this topic data]
+   ;;                   (serialize-fn this topic data))))
 
-   :deserializer (fn [deserialize-fn]
-                   (reify Deserializer
-                     (close [this])
-                     (configure [this configs key?])
-                     (deserialize [this topic data]
-                       (deserialize-fn this topic data))))
+   ;; :deserializer (fn [deserialize-fn]
+   ;;                 (reify Deserializer
+   ;;                   (close [this])
+   ;;                   (configure [this configs key?])
+   ;;                   (deserialize [this topic data]
+   ;;                     (deserialize-fn this topic data))))
 
    :serde (fn
             ([id]
-             (if (keyword? id)
-               `(find-serde id)
-               `(.. Serdes ~id)))
-            ([serializer deserializer]
-             `(.. Serdes (serdeFrom ~serializer ~deserializer))))
-   })
+             (find-serde id)))})
 
 (defn key-value
   [k v]
@@ -384,8 +387,8 @@
     (primitive? expr)             (let [[op & args] expr]
                                     ((primitive op) (values args)))
 
-    (serde? expr)                 (let [[op function] expr]
-                                    `((serde ~op) ~function))
+    (serde? expr)                 (let [[op id] expr]
+                                    (find-serde id))
 
     (lambda? expr)                (let [[op function] expr]
                                     `((lambda ~op) ~function))

@@ -10,9 +10,6 @@
    (org.apache.kafka.streams.processor TopologyBuilder
                                        FailOnInvalidTimestamp)))
 
-(def serdes
-  {:byte-array [:serde 'ByteArray]})
-
 (def topics
   [:strs "a" "b" "c"])
 
@@ -27,8 +24,8 @@
 (def extractor
   {:fail FailOnInvalidTimestamp})
 
-(def keySerde (serdes :byte-array))
-(def valSerde (serdes :byte-array))
+(def keySerde [:serde :byte-array])
+(def valSerde [:serde :byte-array])
 (def topicPattern #"p")
 (def topic "foo")
 (def topics [:strs "foo" "bar"])
@@ -66,8 +63,8 @@
 
 (deftest test-serde
   (testing "builtin"
-    (is (serde? [:serde 'ByteArray]))
-    (is (serde? [:serde 'String]))))
+    (is (ksml* [:serde :byte-array]))
+    (is (ksml* [:serde :string]))))
 
 (deftest test-eval-stream
   (testing "from pattern"
