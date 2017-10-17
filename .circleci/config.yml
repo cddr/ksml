@@ -1,35 +1,20 @@
-# Clojure CircleCI 2.0 configuration file
-#
-# Check https://circleci.com/docs/2.0/language-clojure/ for more details
-#
 version: 2
 jobs:
   build:
+    working_directory: ~/project
     docker:
-      - image: circleci/clojure:lein-2.7.1
-
-    working_directory: ~/repo
-
-    environment:
-      LEIN_ROOT: "true"
-      JVM_OPTS: -Xmx3200m
-    
+      - image: clojure:boot-2.7.1-alpine
     steps:
       - checkout
-
-      # Download and cache dependencies
       - restore_cache:
-          keys:
-          - v1-dependencies-{{ checksum "project.clj" }}
-          # fallback to using the latest cache if no exact match is found
-          - v1-dependencies-
-
-      - run: lein deps
-
+          key: project-{{checksum "boot.properties" }}-{{ checksum "build.boot" }}
+      - run: boot alt-test
       - save_cache:
           paths:
             - ~/.m2
-          key: v1-dependencies-{{ checksum "project.clj" }}
-        
-      # run tests!
-      - run: lein test
+            - ~/.boot/cache/lib
+            - ~/.boot/cache/bin
+          key: project-{{checksum "boot.properties" }}-{{ checksum "build.boot" }}
+    environment:
+      BOOT_JVM_OPTIONS: "-Xms512m -Xmx1024m"
+      BOOT_WATCHERS_DISABLE: "yes"

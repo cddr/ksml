@@ -11,16 +11,9 @@
 
 (task-options!
  pom {:project      'cddr/ksml
-      :version      (System/getProperty "version")
+      :version      (System/getProperty "ksml-version")
       :description  "Library for representing kafka streams topologies as data"
       :url          "https://github.com/cddr/ksml"
       :scm          {:url "https://github.com/cddr/ksml"}
       :license      {"Eclipse Public License" "http://www.eclipse.org/legal/epl-v10.html"}})
 
-(deftask dev "Dev profile"
-  []
-  (comp (cider)
-        (repl :server true)
-        ;; (alt-test)
-        (wait)))
-        
