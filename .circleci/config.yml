@@ -1,15 +1,9 @@
 version: 2
 jobs:
   build:
-    working_directory: ~/project
     docker:
-      - image: clojure:tools-deps
+      - image: circleci/clojure:tools-deps-1.9.0.391
+    working_directory: ~/ksml
     steps:
       - checkout
-      - restore_cache:
-          key: project-{{checksum "deps.edn" }}
-      - run: clj -A:test
-      - save_cache:
-          paths:
-            - ~/.m2
-          key: project-{{checksum "deps.edn" }}
+      - run: clojure -A:test
