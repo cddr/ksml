@@ -1,20 +1,15 @@
 version: 2
 jobs:
   build:
-    working_directory: ~/project
     docker:
-      - image: clojure:boot-2.7.1-alpine
+      - image: circleci/clojure:tools-deps-1.9.0.391
+    working_directory: ~/ksml
     steps:
       - checkout
       - restore_cache:
-          key: project-{{checksum "boot.properties" }}-{{ checksum "build.boot" }}
-      - run: boot alt-test
+          key: v1-ksml-{{checksum "deps.edn"}}
+      - run: clojure -A:test
       - save_cache:
           paths:
             - ~/.m2
-            - ~/.boot/cache/lib
-            - ~/.boot/cache/bin
-          key: project-{{checksum "boot.properties" }}-{{ checksum "build.boot" }}
-    environment:
-      BOOT_JVM_OPTIONS: "-Xms512m -Xmx1024m"
-      BOOT_WATCHERS_DISABLE: "yes"
+          key: v1-ksml-{{checksum "deps.edn" }}
