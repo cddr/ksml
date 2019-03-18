@@ -6,4 +6,10 @@ jobs:
     working_directory: ~/ksml
     steps:
       - checkout
+      - restore_cache:
+          key: v1-ksml-{{checksum "deps.edn"}}
       - run: clojure -A:test
+      - save_cache:
+          paths:
+            - ~/.m2
+          key: v1-ksml-{{checksum "deps.edn" }}
