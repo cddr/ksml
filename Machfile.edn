@@ -1,2 +1,0 @@
-{test {description "Run project tests"
-       update! #$ ["boot alt-test"]}}

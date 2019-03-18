@@ -3,18 +3,13 @@ jobs:
   build:
     working_directory: ~/project
     docker:
-      - image: clojure:boot-2.7.1-alpine
+      - image: clojure:tools-deps
     steps:
       - checkout
       - restore_cache:
-          key: project-{{checksum "boot.properties" }}-{{ checksum "build.boot" }}
-      - run: boot alt-test
+          key: project-{{checksum "deps.edn" }}
+      - run: clj -A:test
       - save_cache:
           paths:
             - ~/.m2
-            - ~/.boot/cache/lib
-            - ~/.boot/cache/bin
-          key: project-{{checksum "boot.properties" }}-{{ checksum "build.boot" }}
-    environment:
-      BOOT_JVM_OPTIONS: "-Xms512m -Xmx1024m"
-      BOOT_WATCHERS_DISABLE: "yes"
+          key: project-{{checksum "deps.edn" }}
