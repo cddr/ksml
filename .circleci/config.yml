@@ -2,12 +2,12 @@
 #
 # Check https://circleci.com/docs/2.0/language-clojure/ for more details
 #
-version: 2.1
+version: 2
 jobs:
   build:
     docker:
       # specify the version you desire here
-      - image: circleci/clojure:tools-deps-1.9.0.394
+      - image: circleci/clojure:lein-2.7.1
 
       # Specify service dependencies here if necessary
       # CircleCI maintains a library of pre-built images
@@ -17,6 +17,7 @@ jobs:
     working_directory: ~/repo
 
     environment:
+      LEIN_ROOT: "true"
       # Customize the JVM maximum heap limit
       JVM_OPTS: -Xmx3200m
 
@@ -30,7 +31,7 @@ jobs:
             # fallback to using the latest cache if no exact match is found
             - v1-dependencies-
 
-      - run: clojure -Spath
+      - run: lein deps
 
       - save_cache:
           paths:
@@ -38,4 +39,4 @@ jobs:
           key: v1-dependencies-{{ checksum "project.clj" }}
 
       # run tests!
-      - run: clojure -M:test
+      - run: lein test
