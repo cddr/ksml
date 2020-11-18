@@ -2,11 +2,11 @@
   (:require
    [cddr.ksml.eval :as ksml.eval])
   (:import
-   (org.apache.kafka.streams KafkaStreams StreamsConfig)
-   (org.apache.kafka.streams.kstream KStreamBuilder Predicate)))
+   (org.apache.kafka.streams StreamsBuilder KafkaStreams StreamsConfig)
+   (org.apache.kafka.streams.kstream Predicate)))
 
 (defn builder []
-  (KStreamBuilder.))
+  (StreamsBuilder.))
 
 (defn kafka-config
   [config]
@@ -14,6 +14,7 @@
     config
     (StreamsConfig. config)))
 
+;; v1
 (defn ksml*
   [expr]
   (eval
@@ -21,9 +22,17 @@
       ~(ksml.eval/eval expr)
       ksml.eval/*builder*)))
 
+;; v2
+;; (defn ksml*
+;;   [expr]
+;;   (eval
+;;    `(binding [*builder* (builder)]
+;;       (.. *builder* ~expr)
+;;       *builder*)))
+
 (defmacro ksml
   [expr]
-  `(binding [ksml.eval/*builder* (KStreamBuilder.)]
+  `(binding [ksml.eval/*builder* (StreamsBuilder.)]
      ~(ksml.eval/eval expr)
      ksml.eval/*builder*))
 

@@ -38,6 +38,9 @@ the computation as data provides a number of advantages
 
 ## Usage
 
+watch out. code has just been heavily refactored and still need to review
+the examples below and make more extensive docs
+
 ```clojure
 (ns com.ksml.wordcount
   (:require
@@ -68,7 +71,7 @@ the computation as data provides a number of advantages
   (let [lines [:stream "TextLinesTopic"]]
     (doto (KafkaStreams. (ksml* (wordcount lines)))
       (.start))))
-```          
+```
 
 ## Bugs
 
