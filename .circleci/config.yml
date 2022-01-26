@@ -38,4 +38,4 @@ jobs:
           key: v2-dependencies-{{ checksum "deps.edn" }}
 
       # run tests!
-      - run: clojure -M:test
+      - run: bin/kaocha

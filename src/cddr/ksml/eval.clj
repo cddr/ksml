@@ -27,7 +27,7 @@
    (org.apache.kafka.streams.processor Processor TimestampExtractor ProcessorSupplier
                                        StreamPartitioner
                                        FailOnInvalidTimestamp, LogAndSkipOnInvalidTimestamp,
-                                       UsePreviousTimeOnInvalidTimestamp, WallclockTimestampExtractor)
+                                       UsePartitionTimeOnInvalidTimestamp, WallclockTimestampExtractor)
    (org.apache.kafka.streams.kstream Named Grouped Consumed Materialized
                                      KStream JoinWindows TimeWindows
                                      Predicate
